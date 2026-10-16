@@ -69,8 +69,9 @@ PRICES_API_URLS = {
     "asia": "https://east.albion-online-data.com/api/v2/stats/prices"
 }
 
-# Inicjalizacja bota
+# Inicjalizacja bota z włączonym message_content
 intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
@@ -119,7 +120,10 @@ async def check_albion_kills():
     main_chan_id = config.get("main_channel_id")
     
     if not tracked or not main_chan_id:
+        print("[Sprawdzanie] Brak śledzonych graczy lub brakuje ustawionego kanału.")
         return
+
+    print(f"[Sprawdzanie] Odpytuję API Albiona... Śledzeni gracze: {tracked}")
 
     main_channel = bot.get_channel(main_chan_id)
     big_chan_id = config.get("big_channel_id")
@@ -327,7 +331,6 @@ async def on_ready():
 # URUCHOMIENIE SERWERA WEB I BOTA
 # ==========================================
 if __name__ == "__main__":
-    # Start serwera HTTP w tle darmowego planu Render Web Service
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
