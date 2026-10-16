@@ -3,10 +3,32 @@ from discord.ext import tasks, commands
 import aiohttp
 import json
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# ==========================================
+# SERWER HTTP (DLA DARMOWEGO WEBSERVICE RENDER)
+# ==========================================
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Albion Killbot is running!")
+
+    def log_message(self, format, *args):
+        # Wyciszenie logów serwera HTTP w konsoli, aby nie śmieciły
+        return
+
+def run_web_server():
+    server = HTTPServer(("0.0.0.0", 8080), SimpleHandler)
+    server.serve_forever()
+
+# ==========================================
+# KONFIGURACJA ZAPISU I ODCZYTU
+# ==========================================
 CONFIG_FILE = "config.json"
 
-# Domyślna konfiguracja, jeśli plik nie istnieje
 DEFAULT_CONFIG = {
     "main_channel_id": None,
     "big_channel_id": None,
@@ -20,7 +42,6 @@ def load_config():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Uzupełnij brakujące klucze jeśli stary config był uboższy
                 for key, val in DEFAULT_CONFIG.items():
                     if key not in data:
                         data[key] = val
@@ -245,7 +266,7 @@ async def usun(interaction: discord.Interaction, nick: str):
 @bot.tree.command(name="lista", description="Wyświetl listę śledzonych graczy i konfigurację")
 async def lista(interaction: discord.Interaction):
     players = config["tracked_players"]
-    players_str = "\n".join([f"• {p}" for p in players]) if players * 1 else "Brak graczy"
+    players_str = "\n".join([f"• {p}" for p in players]) if players else "Brak graczy"
     
     main_ch = f"<#{config['main_channel_id']}>" if config['main_channel_id'] else "Nie ustawiono"
     big_ch = f"<#{config['big_channel_id']}>" if config['big_channel_id'] else "Brak (wyłączone)"
@@ -256,7 +277,7 @@ async def lista(interaction: discord.Interaction):
     embed.add_field(name="💰 Próg Big Kill", value=f"{threshold_mln:.1f}M Silver", inline=True)
     embed.add_field(name="📢 Kanał Główny", value=main_ch, inline=False)
     embed.add_field(name="🚨 Kanał Big Kills", value=big_ch, inline=False)
-    embed.add_field(name=f"👥 Śledzeni graczi ({len(players)})", value=players_str[:1024], inline=False)
+    embed.add_field(name=f"👥 Śledzeni gracze ({len(players)})", value=players_str[:1024], inline=False)
     
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
@@ -300,11 +321,17 @@ async def on_ready():
         
     check_albion_kills.start()
 
-# Pobiera token ze zmiennych środowiskowych systemu (np. z panelu Render)
-TOKEN = os.getenv("DISCORD_TOKEN")
+# ==========================================
+# URUCHOMIENIE SERWERA WEB I BOTA
+# ==========================================
+if __name__ == "__main__":
+    # Start serwera HTTP w tle darmowego planu Render Web Service
+    t = threading.Thread(target=run_web_server)
+    t.daemon = True
+    t.start()
 
-if not TOKEN:
-    print("❌ BŁĄD: Brak zmiennej środowiskowej DISCORD_TOKEN!")
-else:
-    bot.run(TOKEN)
-
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    if not TOKEN:
+        print("❌ BŁĄD: Brak zmiennej środowiskowej DISCORD_TOKEN!")
+    else:
+        bot.run(TOKEN)
