@@ -294,7 +294,7 @@ async def ustaw_kanaly(interaction: discord.Interaction, glowny: discord.TextCha
     await interaction.response.send_message(msg, ephemeral=False)
 
 @bot.tree.command(name="ustaw_prog", description="Zmień próg silvera dla dużych killi (np. 15000000 dla 15M)")
-async def ustaw_prog(value: int, interaction: discord.Interaction):
+async def ustaw_prog(interaction: discord.Interaction, value: int):
     config["high_value_threshold"] = value
     save_config(config)
     await interaction.response.send_message(f"💰 Zaktualizowano próg dużego killa na **{value:,.0f} Silver** ({value/1_000_000:.1f}M).", ephemeral=False)
