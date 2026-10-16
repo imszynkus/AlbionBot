@@ -27,7 +27,7 @@ def run_web_server():
     server.serve_forever()
 
 # ==========================================
-# KONFIGURACJA ZAPISU I ODCZYTU
+# KONFIGURACJA
 # ==========================================
 CONFIG_FILE = "config.json"
 
@@ -76,7 +76,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
-# POMOCNICZE: POBIERANIE CEN I IKON
+# POMOCNICZE: CENY I IKONY
 # ==========================================
 async def get_item_prices(session, item_ids, region):
     if not item_ids:
@@ -88,7 +88,7 @@ async def get_item_prices(session, item_ids, region):
     
     prices = {}
     try:
-        async with session.get(url, timeout=5) as resp:
+        async with session.get(url, timeout=8) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 for entry in data:
@@ -112,12 +112,13 @@ def calculate_equipment_value(equipment_dict, prices):
             total_val += prices.get(item_type, 0) * count
     return total_val
 
-async def fetch_item_image(session, item_type, quality=1):
+async def fetch_item_image(session, item_type, quality=1, size=217):
+    """Pobiera oficjalną ikonę z render.albiononline.com"""
     if not item_type:
         return None
-    url = f"https://render.albiononline.com/v1/item/{item_type}.png?quality={quality}&size=100"
+    url = f"https://render.albiononline.com/v1/item/{item_type}.png?quality={quality}&size={size}"
     try:
-        async with session.get(url, timeout=5) as resp:
+        async with session.get(url, timeout=6) as resp:
             if resp.status == 200:
                 data = await resp.read()
                 img = Image.open(io.BytesIO(data)).convert("RGBA")
@@ -127,128 +128,212 @@ async def fetch_item_image(session, item_type, quality=1):
     return None
 
 # ==========================================
-# PERFEKCYJNIE ZBALANOWANY GENERATOR (PILLOW)
+# GENERATOR OBRAZKA – DOKŁADNY LAYOUT Z SCREENSHOTA
 # ==========================================
 async def generate_kill_image(session, killer_name, victim_name, killer_guild, victim_guild, 
                                 killer_equip, victim_equip, victim_inventory, 
                                 kill_fame=0, total_value=0, time_str=""):
 
-    canvas_w, canvas_h = 760, 480
-    bg_color = (218, 206, 185, 255) # Jasne papierowe tło KillBoard#1
+    # Rozmiar canvasu dopasowany do oryginalnego layoutu
+    canvas_w, canvas_h = 820, 620
+    bg_color = (210, 196, 172, 255)          # papierowe tło
+    slot_bg   = (185, 170, 145, 255)
+    slot_border = (140, 125, 105, 255)
+
     img = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
     draw = ImageDraw.Draw(img)
 
-    slot_size = 54
-
+    # Fonty
     try:
-        font_name = ImageFont.truetype("arial.ttf", 15)
-        font_guild = ImageFont.truetype("arial.ttf", 11)
-        font_stats = ImageFont.truetype("arial.ttf", 13)
-        font_small = ImageFont.truetype("arial.ttf", 10)
-        font_center = ImageFont.truetype("arial.ttf", 11)
+        font_name   = ImageFont.truetype("arial.ttf", 18)
+        font_guild  = ImageFont.truetype("arial.ttf", 13)
+        font_stats  = ImageFont.truetype("arial.ttf", 16)
+        font_small  = ImageFont.truetype("arial.ttf", 12)
+        font_tiny   = ImageFont.truetype("arial.ttf", 11)
+        font_death  = ImageFont.truetype("arial.ttf", 13)
+        font_inv    = ImageFont.truetype("arial.ttf", 12)
     except Exception:
-        font_name = font_guild = font_stats = font_small = font_center = ImageFont.load_default()
+        font_name = font_guild = font_stats = font_small = font_tiny = font_death = font_inv = ImageFont.load_default()
 
-    # 1. NAGŁÓWKI (NICKI I GILDIE)
-    draw.text((45, 18), f"{killer_name}", fill=(20, 20, 20, 255), font=font_name)
-    draw.text((45, 36), f"{killer_guild or 'Brak Gildii'}", fill=(90, 85, 75, 255), font=font_guild)
+    # -------------------------------------------------
+    # 1. NICKI + GILDIE
+    # -------------------------------------------------
+    draw.text((48, 22), killer_name, fill=(25, 22, 18), font=font_name)
+    draw.text((48, 44), killer_guild or "No Guild", fill=(90, 80, 65), font=font_guild)
 
-    draw.text((545, 18), f"{victim_name}", fill=(20, 20, 20, 255), font=font_name)
-    draw.text((545, 36), f"{victim_guild or 'Brak Gildii'}", fill=(90, 85, 75, 255), font=font_guild)
+    draw.text((canvas_w - 48 - draw.textlength(victim_name, font=font_name), 22), 
+              victim_name, fill=(25, 22, 18), font=font_name)
+    draw.text((canvas_w - 48 - draw.textlength(victim_guild or "No Guild", font=font_guild), 44), 
+              victim_guild or "No Guild", fill=(90, 80, 65), font=font_guild)
 
-    # 2. SZTYWNE POZYCJE SLOTÓW EKWIPUNKU
+    # -------------------------------------------------
+    # 2. SLOTTY EKWIPUNKU (dokładne pozycje jak w grze)
+    # -------------------------------------------------
+    slot_size = 58
+    gap = 6
+
+    # Lewa strona (Killer)
+    k_base_x = 48
+    k_base_y = 78
+
     k_slots = {
-        "Bag": (45, 65),       "Head": (103, 65),      "Cape": (161, 65),
-        "MainHand": (45, 123), "Armor": (103, 123),     "OffHand": (161, 123),
-        "Food": (45, 181),     "Shoes": (103, 181),     "Potion": (161, 181),
-        "Mount": (103, 239)
+        "Bag":      (k_base_x,               k_base_y),
+        "Head":     (k_base_x + slot_size + gap, k_base_y),
+        "Cape":     (k_base_x + 2*(slot_size + gap), k_base_y),
+
+        "MainHand": (k_base_x,               k_base_y + slot_size + gap),
+        "Armor":    (k_base_x + slot_size + gap, k_base_y + slot_size + gap),
+        "OffHand":  (k_base_x + 2*(slot_size + gap), k_base_y + slot_size + gap),
+
+        "Food":     (k_base_x,               k_base_y + 2*(slot_size + gap)),
+        "Shoes":    (k_base_x + slot_size + gap, k_base_y + 2*(slot_size + gap)),
+        "Potion":   (k_base_x + 2*(slot_size + gap), k_base_y + 2*(slot_size + gap)),
+
+        "Mount":    (k_base_x + slot_size + gap, k_base_y + 3*(slot_size + gap) + 8),
     }
+
+    # Prawa strona (Victim)
+    v_base_x = canvas_w - 48 - 3*slot_size - 2*gap
+    v_base_y = 78
 
     v_slots = {
-        "Bag": (545, 65),      "Head": (603, 65),      "Cape": (661, 65),
-        "MainHand": (545, 123),"Armor": (603, 123),    "OffHand": (661, 123),
-        "Food": (545, 181),    "Shoes": (603, 181),    "Potion": (661, 181),
-        "Mount": (603, 239)
+        "Bag":      (v_base_x,               v_base_y),
+        "Head":     (v_base_x + slot_size + gap, v_base_y),
+        "Cape":     (v_base_x + 2*(slot_size + gap), v_base_y),
+
+        "MainHand": (v_base_x,               v_base_y + slot_size + gap),
+        "Armor":    (v_base_x + slot_size + gap, v_base_y + slot_size + gap),
+        "OffHand":  (v_base_x + 2*(slot_size + gap), v_base_y + slot_size + gap),
+
+        "Food":     (v_base_x,               v_base_y + 2*(slot_size + gap)),
+        "Shoes":    (v_base_x + slot_size + gap, v_base_y + 2*(slot_size + gap)),
+        "Potion":   (v_base_x + 2*(slot_size + gap), v_base_y + 2*(slot_size + gap)),
+
+        "Mount":    (v_base_x + slot_size + gap, v_base_y + 3*(slot_size + gap) + 8),
     }
 
-    async def draw_slots(slots_dict, equip_data):
+    async def draw_equipment_slots(slots_dict, equip_data):
         for slot_name, (x, y) in slots_dict.items():
-            # Ramka tła
-            draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=4, fill=(198, 185, 162, 255), outline=(160, 145, 125, 255), width=2)
-            
+            # tło slotu
+            draw.rounded_rectangle(
+                [x, y, x + slot_size, y + slot_size],
+                radius=5,
+                fill=slot_bg,
+                outline=slot_border,
+                width=2
+            )
+
             item = equip_data.get(slot_name) if equip_data else None
             if item and item.get("Type"):
-                item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
+                item_img = await fetch_item_image(session, item["Type"], item.get("Quality", 1), size=180)
                 if item_img:
-                    # Dopasowanie ikon – skalowanie ze zdecydowanym wypełnieniem kratek
-                    item_img = item_img.resize((slot_size + 12, slot_size + 12))
-                    img.paste(item_img, (x - 6, y - 6), item_img)
+                    # lekko większe, żeby wypełnić ładnie
+                    item_img = item_img.resize((slot_size + 10, slot_size + 10), Image.Resampling.LANCZOS)
+                    img.paste(item_img, (x - 5, y - 5), item_img)
 
-    await draw_slots(k_slots, killer_equip)
-    await draw_slots(v_slots, victim_equip)
+                # liczba sztuk (jeśli > 1)
+                cnt = item.get("Count", 1)
+                if cnt > 1:
+                    # cień
+                    draw.text((x + 4, y + slot_size - 16), str(cnt), fill=(0, 0, 0, 180), font=font_tiny)
+                    draw.text((x + 3, y + slot_size - 17), str(cnt), fill=(255, 255, 255), font=font_tiny)
 
-    # 3. CENTRUM (FAME, SILVER, DEATH)
+    await draw_equipment_slots(k_slots, killer_equip)
+    await draw_equipment_slots(v_slots, victim_equip)
+
+    # -------------------------------------------------
+    # 3. ŚRODEK – FAME / SILVER / DEATH
+    # -------------------------------------------------
     center_x = canvas_w // 2
 
-    # Rysowanie ikony Kryształu Fame (Czerwony diament zamiast zepsutej czcionki)
-    fame_icon_x, fame_icon_y = center_x - 48, 77
-    draw.polygon([(fame_icon_x+5, fame_icon_y), (fame_icon_x+10, fame_icon_y+6), (fame_icon_x+5, fame_icon_y+12), (fame_icon_x, fame_icon_y+6)], fill=(150, 40, 40, 255))
-    draw.text((center_x - 32, 73), f"{kill_fame:,.0f}", fill=(120, 30, 30, 255), font=font_stats)
+    # Fame (czerwony kryształ)
+    fame_y = 95
+    # prosty diament
+    dx, dy = center_x - 55, fame_y + 4
+    draw.polygon([
+        (dx + 7, dy),
+        (dx + 14, dy + 8),
+        (dx + 7, dy + 16),
+        (dx, dy + 8)
+    ], fill=(160, 35, 35))
+    draw.text((center_x - 32, fame_y), f"{kill_fame:,}", fill=(130, 30, 30), font=font_stats)
     if kill_fame > 0:
-        draw.text((center_x - 32, 91), f"3 x {int(kill_fame/3):,.0f}", fill=(90, 85, 75, 255), font=font_small)
+        draw.text((center_x - 32, fame_y + 20), f"3 × {kill_fame // 3:,}", fill=(100, 90, 75), font=font_small)
 
-    # Rysowanie ikony Silvera (Złota moneta)
-    coin_x, coin_y = center_x - 48, 137
-    draw.ellipse([coin_x, coin_y, coin_x + 10, coin_y + 10], fill=(180, 140, 30, 255), outline=(120, 90, 20, 255))
-    draw.text((center_x - 32, 133), f"{total_value:,.0f}", fill=(40, 30, 30, 255), font=font_stats)
+    # Silver
+    silver_y = 155
+    # moneta
+    draw.ellipse([center_x - 55, silver_y + 2, center_x - 43, silver_y + 14], 
+                 fill=(200, 160, 40), outline=(140, 110, 20))
+    draw.text((center_x - 32, silver_y), f"{total_value:,}", fill=(40, 30, 20), font=font_stats)
 
-    # Kółko DEATH
-    circle_center = (center_x, 200)
-    radius = 24
-    draw.ellipse([circle_center[0] - radius, circle_center[1] - radius, circle_center[0] + radius, circle_center[1] + radius], fill=(45, 45, 45, 255))
-    draw.text((center_x - 20, circle_center[1] - 5), "DEATH", fill=(255, 255, 255, 255), font=font_center)
+    # DEATH (czaszka + kółko)
+    death_y = 230
+    radius = 28
+    draw.ellipse(
+        [center_x - radius, death_y - radius, center_x + radius, death_y + radius],
+        fill=(35, 35, 35)
+    )
+    # prosta czaszka (tekst)
+    draw.text((center_x - 22, death_y - 8), "DEATH", fill=(240, 240, 240), font=font_death)
 
     if time_str:
-        draw.text((center_x - 45, 235), f"{time_str}", fill=(80, 75, 65, 255), font=font_small)
+        draw.text((center_x - draw.textlength(time_str, font=font_tiny) // 2, death_y + 38),
+                  time_str, fill=(85, 75, 60), font=font_tiny)
 
-    # 4. PLECAK (VICTIM'S INVENTORY)
-    if victim_inventory:
-        inv_y = 310
-        draw.text((center_x - 55, inv_y - 18), "VICTIM'S INVENTORY", fill=(70, 65, 55, 255), font=font_small)
+    # -------------------------------------------------
+    # 4. VICTIM'S INVENTORY – pełna siatka
+    # -------------------------------------------------
+    inv_title_y = 340
+    draw.text((center_x - draw.textlength("VICTIM'S INVENTORY", font=font_inv) // 2, inv_title_y),
+              "VICTIM'S INVENTORY", fill=(70, 60, 50), font=font_inv)
 
-        inv_slot_size = 46
-        inv_spacing = 4
-        
-        items_to_show = victim_inventory[:10]
-        cols = len(items_to_show)
-        if cols < 4:
-            cols = 4
+    inv_slot = 48
+    inv_gap = 5
+    max_cols = 10
+    max_rows = 3
 
-        grid_w = cols * (inv_slot_size + inv_spacing) - inv_spacing
-        inv_start_x = (canvas_w - grid_w) // 2
+    items = [i for i in (victim_inventory or []) if i and i.get("Type")]
+    items = items[:max_cols * max_rows]
 
-        for idx in range(cols):
-            x = inv_start_x + idx * (inv_slot_size + inv_spacing)
-            y = inv_y
+    total_slots = max_cols * max_rows
+    start_x = (canvas_w - (max_cols * inv_slot + (max_cols - 1) * inv_gap)) // 2
+    start_y = inv_title_y + 28
 
-            draw.rounded_rectangle([x, y, x + inv_slot_size, y + inv_slot_size], radius=4, fill=(198, 185, 162, 255), outline=(160, 145, 125, 255), width=1)
+    for idx in range(total_slots):
+        col = idx % max_cols
+        row = idx // max_cols
+        x = start_x + col * (inv_slot + inv_gap)
+        y = start_y + row * (inv_slot + inv_gap)
 
-            if idx < len(victim_inventory):
-                item = victim_inventory[idx]
-                if item and item.get("Type"):
-                    item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
-                    if item_img:
-                        item_img = item_img.resize((inv_slot_size + 8, inv_slot_size + 8))
-                        img.paste(item_img, (x - 4, y - 4), item_img)
+        # tło slotu
+        draw.rounded_rectangle(
+            [x, y, x + inv_slot, y + inv_slot],
+            radius=4,
+            fill=slot_bg,
+            outline=slot_border,
+            width=1
+        )
 
-                    cnt = item.get("Count", 1)
-                    if cnt > 1:
-                        draw.text((x + 3, y + inv_slot_size - 13), f"x{cnt}", fill=(255, 255, 255, 255), font=font_small)
+        if idx < len(items):
+            item = items[idx]
+            item_img = await fetch_item_image(session, item["Type"], item.get("Quality", 1), size=160)
+            if item_img:
+                item_img = item_img.resize((inv_slot + 6, inv_slot + 6), Image.Resampling.LANCZOS)
+                img.paste(item_img, (x - 3, y - 3), item_img)
 
+            cnt = item.get("Count", 1)
+            if cnt > 1:
+                # cień + biały tekst
+                draw.text((x + 3, y + inv_slot - 15), str(cnt), fill=(0, 0, 0, 160), font=font_tiny)
+                draw.text((x + 2, y + inv_slot - 16), str(cnt), fill=(255, 255, 255), font=font_tiny)
+
+    # -------------------------------------------------
     buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
+    img.save(buffer, format="PNG", optimize=True)
     buffer.seek(0)
     return buffer
+
 # ==========================================
 # PĘTLA SPRAWDZAJĄCA KILLBOARD
 # ==========================================
@@ -276,14 +361,14 @@ async def check_albion_kills():
     async with aiohttp.ClientSession() as session:
         url = f"{base_url}/events?limit=51&offset=0"
         try:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(url, timeout=12) as resp:
                 if resp.status != 200:
-                    print(f"[API ERROR] Kod odpowiedzi API: {resp.status}", flush=True)
+                    print(f"[API ERROR] Status: {resp.status}", flush=True)
                     return
                 events = await resp.json()
-                print(f"[API OK] Pobrano {len(events)} ostatnich zdarzeń z serwera ({region.upper()}).", flush=True)
+                print(f"[API OK] Pobrano {len(events)} eventów ({region.upper()})", flush=True)
         except Exception as e:
-            print(f"[API ERROR] Błąd połączenia z API: {e}", flush=True)
+            print(f"[API ERROR] {e}", flush=True)
             return
 
         tracked_lower = [t.lower() for t in tracked]
@@ -294,26 +379,28 @@ async def check_albion_kills():
                 continue
                 
             seen_event_ids.add(event_id)
-            if len(seen_event_ids) > 2000:
+            if len(seen_event_ids) > 2500:
                 seen_event_ids.pop()
 
-            killer_name = event.get("Killer", {}).get("Name", "")
-            victim_name = event.get("Victim", {}).get("Name", "")
+            killer = event.get("Killer", {})
+            victim = event.get("Victim", {})
+            killer_name = killer.get("Name", "")
+            victim_name = victim.get("Name", "")
             participants = event.get("Participants", [])
             participant_names = [p.get("Name") for p in participants if p.get("Name")]
 
             is_killer = killer_name.lower() in tracked_lower
             is_victim = victim_name.lower() in tracked_lower
-            is_participant = any(p_name.lower() in tracked_lower for p_name in participant_names)
+            is_participant = any(p.lower() in tracked_lower for p in participant_names)
 
             if not (is_killer or is_victim or is_participant):
                 continue
 
-            print(f"[KILLS] WYKRYTO KILL! Zabójca: {killer_name} | Ofiara: {victim_name}", flush=True)
+            print(f"[KILL] {killer_name} → {victim_name}", flush=True)
 
-            victim_equip = event.get("Victim", {}).get("Equipment", {})
-            killer_equip = event.get("Killer", {}).get("Equipment", {})
-            victim_inventory = [item for item in event.get("Victim", {}).get("Inventory", []) if item]
+            victim_equip = victim.get("Equipment", {})
+            killer_equip = killer.get("Equipment", {})
+            victim_inventory = [item for item in victim.get("Inventory", []) if item]
 
             all_items = [item.get("Type") for item in victim_equip.values() if item]
             all_items += [item.get("Type") for item in victim_inventory if item]
@@ -324,10 +411,16 @@ async def check_albion_kills():
             total_value = equip_value + inv_value
             kill_fame = event.get("TotalVictimKillFame", 0)
 
-            k_guild = event.get('Killer', {}).get('GuildName') or ''
-            v_guild = event.get('Victim', {}).get('GuildName') or ''
+            k_guild = killer.get("GuildName") or ""
+            v_guild = victim.get("GuildName") or ""
             time_raw = event.get("TimeStamp", "")
-            time_formatted = time_raw[:16].replace("T", " ") if time_raw else ""
+            time_formatted = ""
+            if time_raw:
+                try:
+                    dt = datetime.fromisoformat(time_raw.replace("Z", "+00:00"))
+                    time_formatted = dt.strftime("%H:%M %d %b %Y")
+                except Exception:
+                    time_formatted = time_raw[:16].replace("T", " ")
 
             threshold = config.get("high_value_threshold", 15000000)
 
@@ -348,7 +441,7 @@ async def check_albion_kills():
 
             try:
                 await main_channel.send(file=file, embed=embed)
-                print(f"[SUCCESS] Wysłano wyrenderowany killboard w stylu KillBoard#1!", flush=True)
+                print(f"[SUCCESS] Wysłano killboard", flush=True)
             except Exception as e:
                 print(f"[DISCORD ERROR] {e}", flush=True)
 
@@ -356,59 +449,86 @@ async def check_albion_kills():
                 img_buffer.seek(0)
                 big_file = discord.File(fp=img_buffer, filename="killboard.png")
                 await big_channel.send(
-                    content=f"🚨 **BIG KILL / LEGENDARNY LOOT!** 🚨",
+                    content="🚨 **BIG KILL / LEGENDARY LOOT!** 🚨",
                     file=big_file,
                     embed=embed
                 )
 
 # ==========================================
-# KOMENDY DISCORDA
+# KOMENDY
 # ==========================================
-# ==========================================
-# KOMENDA SLASH (/test_kill) DLA NOWEGO GENERATORA
-# ==========================================
-@bot.tree.command(name="test_kill", description="Wygeneruj testowy obrazek killboardu z pełnym ekwipunkiem")
+@bot.tree.command(name="test_kill", description="Wygeneruj testowy killboard dokładnie jak na screenshocie")
 async def test_kill(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
 
-    # Pełne 10 slotów dla Zabójcy
+    # Dane z oryginalnego screenshota (AwesomeNinja vs MitchDagger)
     mock_killer_equip = {
-        "Bag": {"Type": "T8_BAG", "Quality": 2},
-        "Head": {"Type": "T8_HEAD_LEATHER", "Quality": 3},
-        "Cape": {"Type": "T8_CAPE", "Quality": 2},
+        "Bag":      {"Type": "T8_BAG", "Quality": 2},
+        "Head":     {"Type": "T8_HEAD_LEATHER_SET1", "Quality": 3},
+        "Cape":     {"Type": "T8_CAPE", "Quality": 2},
         "MainHand": {"Type": "T8_MAIN_SWORD", "Quality": 3},
-        "Armor": {"Type": "T8_ARMOR_LEATHER_SET", "Quality": 2},
-        "OffHand": {"Type": "T8_OFF_TOWER_SHIELD", "Quality": 1},
-        "Food": {"Type": "T8_MEAL_STEW", "Quality": 1},
-        "Shoes": {"Type": "T8_SHOES_LEATHER", "Quality": 2},
-        "Potion": {"Type": "T8_POTION_HEAL", "Quality": 1},
-        "Mount": {"Type": "T8_MOUNT_HORSE", "Quality": 1}
+        "Armor":    {"Type": "T8_ARMOR_LEATHER_SET1", "Quality": 2},
+        "OffHand":  {"Type": "T8_OFF_SHIELD", "Quality": 1},
+        "Food":     {"Type": "T8_MEAL_STEW", "Quality": 1},
+        "Shoes":    {"Type": "T8_SHOES_LEATHER_SET1", "Quality": 2},
+        "Potion":   {"Type": "T8_POTION_HEAL", "Quality": 1},
+        "Mount":    {"Type": "T8_MOUNT_HORSE", "Quality": 1}
     }
 
-    # Pełne 10 slotów dla Ofiary
     mock_victim_equip = {
-        "Bag": {"Type": "T7_BAG", "Quality": 1},
-        "Head": {"Type": "T7_HEAD_PLATE", "Quality": 2},
-        "Cape": {"Type": "T7_CAPE", "Quality": 1},
+        "Bag":      {"Type": "T7_BAG", "Quality": 1},
+        "Head":     {"Type": "T7_HEAD_PLATE_SET1", "Quality": 2},
+        "Cape":     {"Type": "T7_CAPE", "Quality": 1},
         "MainHand": {"Type": "T7_MAIN_AXE", "Quality": 2},
-        "Armor": {"Type": "T7_ARMOR_PLATE", "Quality": 2},
-        "OffHand": {"Type": "T7_OFF_SHIELD", "Quality": 1},
-        "Food": {"Type": "T7_MEAL_STEW", "Quality": 1},
-        "Shoes": {"Type": "T7_SHOES_PLATE", "Quality": 1},
-        "Potion": {"Type": "T7_POTION_HEAL", "Quality": 1},
-        "Mount": {"Type": "T7_MOUNT_ARMORED_HORSE", "Quality": 1}
+        "Armor":    {"Type": "T7_ARMOR_PLATE_SET1", "Quality": 2},
+        "OffHand":  {"Type": "T7_OFF_SHIELD", "Quality": 1},
+        "Food":     {"Type": "T7_MEAL_STEW", "Quality": 1},
+        "Shoes":    {"Type": "T7_SHOES_PLATE_SET1", "Quality": 1},
+        "Potion":   {"Type": "T7_POTION_HEAL", "Quality": 1},
+        "Mount":    {"Type": "T7_MOUNT_ARMORED_HORSE", "Quality": 1}
     }
 
-    # Duży zestaw przedmiotów w plecaku ofiary
+    # Inventory zbliżone do tego z obrazka (wiele przedmiotów)
     mock_inventory = [
-        {"Type": "T8_ORE", "Count": 120},
-        {"Type": "T6_POTION_HEAL", "Count": 15},
-        {"Type": "T7_MEAL_STEW", "Count": 5},
-        {"Type": "T8_BAG", "Count": 1},
-        {"Type": "T6_HEAD_CLOTH", "Count": 1},
-        {"Type": "T7_ARMOR_LEATHER", "Count": 2},
-        {"Type": "T8_MOUNT_HORSE", "Count": 1},
-        {"Type": "T6_RUNE", "Count": 250}
+        {"Type": "T8_ORE", "Count": 1},
+        {"Type": "T7_ORE", "Count": 1},
+        {"Type": "T6_ORE", "Count": 1},
+        {"Type": "T8_METALBAR", "Count": 1},
+        {"Type": "T7_METALBAR", "Count": 1},
+        {"Type": "T6_METALBAR", "Count": 1},
+        {"Type": "T8_PLANKS", "Count": 1},
+        {"Type": "T7_PLANKS", "Count": 1},
+        {"Type": "T6_PLANKS", "Count": 1},
+        {"Type": "T8_CLOTH", "Count": 16},
+        {"Type": "T7_CLOTH", "Count": 1},
+        {"Type": "T6_CLOTH", "Count": 1},
+        {"Type": "T8_LEATHER", "Count": 1},
+        {"Type": "T7_LEATHER", "Count": 1},
+        {"Type": "T6_LEATHER", "Count": 1},
+        {"Type": "T8_FIBER", "Count": 1},
+        {"Type": "T7_FIBER", "Count": 1},
+        {"Type": "T6_FIBER", "Count": 1},
+        {"Type": "T8_HIDE", "Count": 1},
+        {"Type": "T7_HIDE", "Count": 1},
+        {"Type": "T6_HIDE", "Count": 24},
+        {"Type": "T8_ROCK", "Count": 1},
+        {"Type": "T7_ROCK", "Count": 156},
+        {"Type": "T6_ROCK", "Count": 16},
+        {"Type": "T8_WOOD", "Count": 4},
+        {"Type": "T7_WOOD", "Count": 1},
+        {"Type": "T6_WOOD", "Count": 1},
+        {"Type": "T8_POTION_HEAL", "Count": 142},
+        {"Type": "T7_POTION_HEAL", "Count": 1},
+        {"Type": "T6_POTION_HEAL", "Count": 1},
+        {"Type": "T8_MEAL_STEW", "Count": 40},
+        {"Type": "T7_MEAL_STEW", "Count": 1},
+        {"Type": "T6_MEAL_STEW", "Count": 70},
+        {"Type": "T8_RUNE", "Count": 1},
+        {"Type": "T7_RUNE", "Count": 60},
+        {"Type": "T6_RUNE", "Count": 385},
+        {"Type": "T8_SOUL", "Count": 190},
+        {"Type": "T7_SOUL", "Count": 1},
+        {"Type": "T6_SOUL", "Count": 1},
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -423,12 +543,12 @@ async def test_kill(interaction: discord.Interaction):
             victim_inventory=mock_inventory,
             kill_fame=2853543,
             total_value=102530668,
-            time_str="22:49 03 Jan 2026"
+            time_str="22:49 03 Jan 2022"
         )
         
         file = discord.File(fp=img_buffer, filename="killboard.png")
         embed = discord.Embed(
-            title="🧪 KILLBOARD (Pełny Ekwipunek)",
+            title="🧪 Test Killboard – layout 1:1",
             color=discord.Color.blurple()
         )
         embed.set_image(url="attachment://killboard.png")
@@ -478,7 +598,7 @@ async def on_ready():
         
     if not check_albion_kills.is_running():
         check_albion_kills.start()
-        print("⚔️ Pętla sprawdzająca kille została uruchomiona!", flush=True)
+        print("⚔️ Pętla sprawdzająca kille uruchomiona!", flush=True)
 
 if __name__ == "__main__":
     t = threading.Thread(target=run_web_server)
