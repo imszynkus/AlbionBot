@@ -395,7 +395,7 @@ async def check_albion_kills():
 
             is_killer = killer_name.lower() in tracked_lower
             is_victim = victim_name.lower() in tracked_lower
-            is_participant = any(p.lower() in tracked_lower for p.lower() in participant_names)
+            is_participant = any(p.lower() in tracked_lower for p in participant_names if p)
 
             if not (is_killer or is_victim or is_participant):
                 continue
