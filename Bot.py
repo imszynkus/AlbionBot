@@ -7,7 +7,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================
-# SERWER HTTP (DLA DARMOWEGO WEBSERVICE RENDER)
+# SERWER HTTP (DLA WEBSERVICE RENDER)
 # ==========================================
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -17,7 +17,6 @@ class SimpleHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Albion Killbot is running!")
 
     def log_message(self, format, *args):
-        # Wyciszenie logów serwera HTTP w konsoli, aby nie śmieciły
         return
 
 def run_web_server():
@@ -29,12 +28,13 @@ def run_web_server():
 # ==========================================
 CONFIG_FILE = "config.json"
 
+# WPISZ TUTAJ SWÓJ KANAŁ I NICK, ABY BIAŁA LISTA NIE ZNIKANIAŁA PO REBOOTACH RENDERA:
 DEFAULT_CONFIG = {
-    "main_channel_id": None,
+    "main_channel_id": 1560358432165466303,             # Np. 123456789012345678 (lub ustaw komendą /ustaw_kanaly)
     "big_channel_id": None,
-    "high_value_threshold": 15000000,  # 15 mln silvera
-    "server_region": "europe",          # europe, live, asia
-    "tracked_players": []
+    "high_value_threshold": 15000000,
+    "server_region": "europe",           # europe, live, asia
+    "tracked_players": ["Szynkus"]                # Np. ["Szynkus"] (lub dodaj komendą /dodaj)
 }
 
 def load_config():
@@ -50,9 +50,9 @@ def load_config():
             return DEFAULT_CONFIG.copy()
     return DEFAULT_CONFIG.copy()
 
-def save_config(config):
+def save_config(cfg):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
+        json.dump(cfg, f, ensure_ascii=False, indent=4)
 
 config = load_config()
 seen_event_ids = set()
@@ -69,7 +69,6 @@ PRICES_API_URLS = {
     "asia": "https://east.albion-online-data.com/api/v2/stats/prices"
 }
 
-# Inicjalizacja bota z włączonym message_content
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -97,7 +96,7 @@ async def get_item_prices(session, item_ids, region):
                         if item_id not in prices or price < prices[item_id]:
                             prices[item_id] = price
     except Exception as e:
-        print(f"[Ceny] Błąd pobierania cen: {e}")
+        print(f"[Ceny Error] {e}", flush=True)
     return prices
 
 def calculate_equipment_value(equipment_dict, prices):
@@ -116,40 +115,43 @@ def calculate_equipment_value(equipment_dict, prices):
 # ==========================================
 @tasks.loop(seconds=30)
 async def check_albion_kills():
-    print("[Sprawdzanie] Pętla wystartowała, odpytuję API Albiona...")
+    global config
+    config = load_config()  # Dynamiczne odświeżenie konfiguracji przy każdym obrocie pętli
     
     tracked = config.get("tracked_players", [])
     main_chan_id = config.get("main_channel_id")
     
+    print(f"[PĘTLA] Śledzeni gracze: {tracked} | Kanał ID: {main_chan_id}", flush=True)
+
     if not tracked or not main_chan_id:
-        print(f"[Sprawdzanie] Pomijam – brak graczy ({tracked}) lub kanału ({main_chan_id}).")
+        print("[PĘTLA] Pomijam – brak śledzonych graczy lub kanału w configu.", flush=True)
         return
-
-
-    print(f"[Sprawdzanie] Odpytuję API Albiona... Śledzeni gracze: {tracked}")
 
     main_channel = bot.get_channel(main_chan_id)
     big_chan_id = config.get("big_channel_id")
     big_channel = bot.get_channel(big_chan_id) if big_chan_id else None
 
     if not main_channel:
+        print(f"[ERROR] Nie odnaleziono kanału na Discordzie dla ID: {main_chan_id}", flush=True)
         return
 
     region = config.get("server_region", "europe")
     base_url = API_URLS.get(region, API_URLS["europe"])
 
     async with aiohttp.ClientSession() as session:
-        url = f"{base_url}/events?limit=51&offset=0"
+        url = f"{base_url}/events?limit=100&offset=0"
         try:
-            async with session.get(url) as resp:
+            async with session.get(url, timeout=10) as resp:
                 if resp.status != 200:
-                    print(f"[API Error] Błąd odpowiedzi serwera Albiona: Status {resp.status}")
+                    print(f"[API ERROR] Kod odpowiedzi API: {resp.status}", flush=True)
                     return
                 events = await resp.json()
-                print(f"[API] Pobrano {len(events)} ostatnich zdarzeń z API Albiona.")
+                print(f"[API OK] Pobrano {len(events)} ostatnich zdarzeń z serwera ({region.upper()}).", flush=True)
         except Exception as e:
-            print(f"[API Error] Wyjątek podczas połączenia z API: {e}")
+            print(f"[API ERROR] Błąd połączenia: {e}", flush=True)
             return
+
+        tracked_lower = [t.lower() for t in tracked]
 
         for event in reversed(events):
             event_id = event.get("EventId")
@@ -157,7 +159,7 @@ async def check_albion_kills():
                 continue
                 
             seen_event_ids.add(event_id)
-            if len(seen_event_ids) > 1000:
+            if len(seen_event_ids) > 2000:
                 seen_event_ids.pop()
 
             killer_name = event.get("Killer", {}).get("Name", "")
@@ -165,14 +167,14 @@ async def check_albion_kills():
             participants = event.get("Participants", [])
             participant_names = [p.get("Name") for p in participants if p.get("Name")]
 
-            # Sprawdzenie czy ktoś z listy PK uczestniczył w zabójstwie
-            is_tracked = any(
-                p_name in tracked 
-                for p_name in [killer_name] + participant_names
-            )
+            is_killer = killer_name.lower() in tracked_lower
+            is_victim = victim_name.lower() in tracked_lower
+            is_participant = any(p_name.lower() in tracked_lower for p_name in participant_names)
 
-            if not is_tracked:
+            if not (is_killer or is_victim or is_participant):
                 continue
+
+            print(f"[KILLS] WYKRYTO KILL! Zabójca: {killer_name} | Ofiara: {victim_name}", flush=True)
 
             victim_equip = event.get("Victim", {}).get("Equipment", {})
             item_ids = [item.get("Type") for item in victim_equip.values() if item]
@@ -187,7 +189,6 @@ async def check_albion_kills():
                 color=discord.Color.gold() if total_estimated_value >= threshold else discord.Color.red()
             )
 
-            # Ofiara
             victim_ip = round(event.get("Victim", {}).get("AverageItemPower", 0))
             embed.add_field(
                 name="🎯 Ofiara",
@@ -198,7 +199,6 @@ async def check_albion_kills():
                 inline=False
             )
 
-            # Ekwipunek
             gear_text = ""
             for slot, item in victim_equip.items():
                 if item:
@@ -210,7 +210,6 @@ async def check_albion_kills():
 
             embed.add_field(name="🎒 Ekwipunek Ofiary", value=gear_text[:1024], inline=False)
 
-            # Asysty i obrażenia
             total_damage = sum(p.get("DamageDone", 0) for p in participants)
             assists_text = ""
             for p in participants:
@@ -222,7 +221,7 @@ async def check_albion_kills():
                 main_hand = p.get("Equipment", {}).get("MainHand")
                 weapon_name = main_hand.get("Type", "Brak broni").replace("_", " ") if main_hand else "Gołe ręce"
 
-                icon = "⭐" if p_name in tracked else "🗡️"
+                icon = "⭐" if p_name.lower() in tracked_lower else "🗡️"
                 assists_text += (
                     f"{icon} **{p_name}** ({p_ip} IP)\n"
                     f"┗ 🪓 *{weapon_name}*\n"
@@ -241,7 +240,12 @@ async def check_albion_kills():
 
             embed.set_footer(text=f"Albion Online Killbot • Region: {region.upper()} • Event ID: {event_id}")
 
-            await main_channel.send(embed=embed)
+            try:
+                await main_channel.send(embed=embed)
+                print(f"[SUCCESS] Wysłano powiadomienie o killu na Discord!", flush=True)
+            except Exception as send_error:
+                print(f"[DISCORD ERROR] Nie udało się wysłać wiadomości: {send_error}", flush=True)
+
             if total_estimated_value >= threshold and big_channel:
                 await big_channel.send(
                     content=f"🚨 **BIG KILL / LEGENDARNY LOOT (> {threshold/1_000_000:.0f}M)!** 🚨",
@@ -249,9 +253,8 @@ async def check_albion_kills():
                 )
 
 # ==========================================
-# PANEL STEROWANIA - SLASH COMMANDS
+# COMMANDS / SLASH COMMANDS
 # ==========================================
-
 @bot.tree.command(name="dodaj", description="Dodaj nowego gracza do śledzenia")
 async def dodaj(interaction: discord.Interaction, nick: str):
     if nick in config["tracked_players"]:
@@ -302,17 +305,17 @@ async def ustaw_kanaly(interaction: discord.Interaction, glowny: discord.TextCha
     
     await interaction.response.send_message(msg, ephemeral=False)
 
-@bot.tree.command(name="ustaw_prog", description="Zmień próg silvera dla dużych killi (np. 15000000 dla 15M)")
+@bot.tree.command(name="ustaw_prog", description="Zmień próg silvera dla dużych killi")
 async def ustaw_prog(interaction: discord.Interaction, value: int):
     config["high_value_threshold"] = value
     save_config(config)
-    await interaction.response.send_message(f"💰 Zaktualizowano próg dużego killa na **{value:,.0f} Silver** ({value/1_000_000:.1f}M).", ephemeral=False)
+    await interaction.response.send_message(f"💰 Zaktualizowano próg dużego killa na **{value:,.0f} Silver**.", ephemeral=False)
 
 @bot.tree.command(name="ustaw_region", description="Zmień region serwera gry")
 async def ustaw_region(interaction: discord.Interaction, region: str):
     region = region.lower()
     if region not in ["europe", "live", "asia"]:
-        await interaction.response.send_message("❌ Nieprawidłowy region. Wybierz: `europe`, `live` (Ameryka) lub `asia`.", ephemeral=True)
+        await interaction.response.send_message("❌ Nieprawidłowy region. Wybierz: `europe`, `live` lub `asia`.", ephemeral=True)
         return
     
     config["server_region"] = region
@@ -321,20 +324,17 @@ async def ustaw_region(interaction: discord.Interaction, region: str):
 
 @bot.event
 async def on_ready():
-    print(f"✅ Zalogowano jako: {bot.user.name}")
+    print(f"✅ Zalogowano jako: {bot.user.name}", flush=True)
     try:
         synced = await bot.tree.sync()
-        print(f"🔄 Zsynchronizowano {len(synced)} komend.")
+        print(f"🔄 Zsynchronizowano {len(synced)} komend.", flush=True)
     except Exception as e:
-        print(f"Błąd synchronizacji: {e}")
+        print(f"Błąd synchronizacji: {e}", flush=True)
         
     if not check_albion_kills.is_running():
         check_albion_kills.start()
-        print("⚔️ Pętla sprawdzająca kille została uruchomiona!")
+        print("⚔️ Pętla sprawdzająca kille została uruchomiona!", flush=True)
 
-# ==========================================
-# URUCHOMIENIE SERWERA WEB I BOTA
-# ==========================================
 if __name__ == "__main__":
     t = threading.Thread(target=run_web_server)
     t.daemon = True
@@ -342,6 +342,6 @@ if __name__ == "__main__":
 
     TOKEN = os.getenv("DISCORD_TOKEN")
     if not TOKEN:
-        print("❌ BŁĄD: Brak zmiennej środowiskowej DISCORD_TOKEN!")
+        print("❌ BŁĄD: Brak zmiennej środowiskowej DISCORD_TOKEN!", flush=True)
     else:
         bot.run(TOKEN)
