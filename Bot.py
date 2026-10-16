@@ -127,136 +127,112 @@ async def fetch_item_image(session, item_type, quality=1):
     return None
 
 # ==========================================
-# GENERATOR STYLU "KILLBOARD#1" (PILLOW)
-# ==========================================
-# ==========================================
-# PERFEKCYJNY GENERATOR GRAFIKI W STYLU KILLBOARD#1
+# PRECYZYJNY PIKSELOWO GENERATOR GRAFIKI
 # ==========================================
 async def generate_kill_image(session, killer_name, victim_name, killer_guild, victim_guild, 
                                 killer_equip, victim_equip, victim_inventory, 
                                 kill_fame=0, total_value=0, time_str=""):
 
-    # Rozmiar płótna idealnie dopasowany do proporcji KillBoard#1
-    canvas_w, canvas_h = 760, 540
-    bg_color = (218, 206, 185, 255) # Charakterystyczny beżowy pergamin KillBoard#1
+    canvas_w, canvas_h = 760, 480
+    bg_color = (218, 206, 185, 255) # Tło papierowe KillBoard#1
     img = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
     draw = ImageDraw.Draw(img)
 
     slot_size = 52
-    spacing = 5
 
     try:
         font_name = ImageFont.truetype("arial.ttf", 15)
         font_guild = ImageFont.truetype("arial.ttf", 11)
         font_stats = ImageFont.truetype("arial.ttf", 13)
         font_small = ImageFont.truetype("arial.ttf", 10)
-        font_center = ImageFont.truetype("arial.ttf", 12)
+        font_center = ImageFont.truetype("arial.ttf", 11)
     except Exception:
         font_name = font_guild = font_stats = font_small = font_center = ImageFont.load_default()
 
-    # ----------------------------------------------------
-    # 1. NAGŁÓWKI GRACZY (ZABÓJCA I OFIARA)
-    # ----------------------------------------------------
-    start_x_killer = 55
-    start_x_victim = 505
+    # 1. NAGŁÓWKI (NICKI I GILDIE)
+    draw.text((45, 18), f"{killer_name}", fill=(20, 20, 20, 255), font=font_name)
+    draw.text((45, 36), f"{killer_guild or 'Brak Gildii'}", fill=(90, 85, 75, 255), font=font_guild)
 
-    draw.text((start_x_killer, 18), f"{killer_name}", fill=(20, 20, 20, 255), font=font_name)
-    draw.text((start_x_killer, 37), f"{killer_guild or 'Brak Gildii'}", fill=(90, 85, 75, 255), font=font_guild)
+    draw.text((545, 18), f"{victim_name}", fill=(20, 20, 20, 255), font=font_name)
+    draw.text((545, 36), f"{victim_guild or 'Brak Gildii'}", fill=(90, 85, 75, 255), font=font_guild)
 
-    draw.text((start_x_victim, 18), f"{victim_name}", fill=(20, 20, 20, 255), font=font_name)
-    draw.text((start_x_victim, 37), f"{victim_guild or 'Brak Gildii'}", fill=(90, 85, 75, 255), font=font_guild)
-
-    # ----------------------------------------------------
-    # 2. UKŁAD SIATKI EKWIPUNKU (3x4) DLA OBU STRON
-    # ----------------------------------------------------
-    # Mapowanie slotów Albiona w kolumnach i wierszach
-    layout = {
-        "Head": (0, 0),     "Armor": (1, 0),     "Cape": (2, 0),
-        "MainHand": (0, 1), "OffHand": (1, 1),   # (kolumna 2 wiersz 1 wolny lub na plecak)
-        "Food": (0, 2),     "Shoes": (1, 2),     "Potion": (2, 2),
-        "Mount": (0, 3)
-    }
-    
-    # Precyzyjne pozycje slotów zgodne z oryginalnym layoutem KillBoard#1
+    # 2. SZTYWNE POZYCJE SLOTÓW EKWIPUNKU (PIXEL PERFECT)
     # Lewa strona (Zabójca)
-    k_slots_coords = {
-        "Head": (45, 75), "Armor": (105, 75), "Cape": (165, 75),
-        "MainHand": (45, 135), "OffHand": (105, 135),
-        "Food": (45, 195), "Shoes": (105, 195), "Potion": (165, 195),
-        "Mount": (105, 255)
+    k_slots = {
+        "Bag": (45, 65),       "Head": (103, 65),      "Cape": (161, 65),
+        "MainHand": (45, 123), "Armor": (103, 123),     "OffHand": (161, 123),
+        "Food": (45, 181),     "Shoes": (103, 181),     "Potion": (161, 181),
+        "Mount": (103, 239)
     }
 
-    # Prawa strona (Ofiara) - odbicie lustrzane / symetryczne
-    v_slots_coords = {
-        "Head": (495, 75), "Armor": (555, 75), "Cape": (615, 75),
-        "MainHand": (495, 135), "OffHand": (555, 135),
-        "Food": (495, 195), "Shoes": (555, 195), "Potion": (615, 195),
-        "Mount": (555, 255)
+    # Prawa strona (Ofiara)
+    v_slots = {
+        "Bag": (545, 65),      "Head": (603, 65),      "Cape": (661, 65),
+        "MainHand": (545, 123),"Armor": (603, 123),    "OffHand": (661, 123),
+        "Food": (545, 181),    "Shoes": (603, 181),    "Potion": (661, 181),
+        "Mount": (603, 239)
     }
 
-    async def draw_player_equipment(coords_dict, equip_data):
-        for slot, (x, y) in coords_dict.items():
-            # Rysowanie tła slotu (beżowe wgłębienie)
-            draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=5, fill=(198, 185, 162, 255), outline=(160, 145, 125, 255), width=2)
+    async def draw_slots(slots_dict, equip_data):
+        for slot_name, (x, y) in slots_dict.items():
+            # Tło slotu (ramka)
+            draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=4, fill=(198, 185, 162, 255), outline=(160, 145, 125, 255), width=2)
             
-            item = equip_data.get(slot) if equip_data else None
+            item = equip_data.get(slot_name) if equip_data else None
             if item and item.get("Type"):
                 item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
                 if item_img:
-                    item_img = item_img.resize((slot_size + 6, slot_size + 6))
-                    img.paste(item_img, (x - 3, y - 3), item_img)
+                    # Dopasowanie grafiki idealnie wewnątrz slotu
+                    item_img = item_img.resize((slot_size + 4, slot_size + 4))
+                    img.paste(item_img, (x - 2, y - 2), item_img)
 
-    await draw_player_equipment(k_slots_coords, killer_equip)
-    await draw_player_equipment(v_slots_coords, victim_equip)
+    await draw_slots(k_slots, killer_equip)
+    await draw_slots(v_slots, victim_equip)
 
-    # ----------------------------------------------------
-    # 3. CENTRALNY PANEL STATYSTYK (FAME, SILVER, DEATH)
-    # ----------------------------------------------------
+    # 3. CENTRUM (STATYSTYKI / DEATH)
     center_x = canvas_w // 2
 
-    # Fame (z ikoną / nagłówkiem)
-    draw.text((center_x - 50, 80), f"{kill_fame:,.0f}", fill=(40, 30, 30, 255), font=font_stats)
-    draw.text((center_x - 50, 98), f"3 x {int(kill_fame/3):,.0f}" if kill_fame > 0 else "", fill=(90, 85, 75, 255), font=font_small)
+    # Fame
+    draw.text((center_x - 35, 75), f"☠️ {kill_fame:,.0f}", fill=(120, 30, 30, 255), font=font_stats)
+    if kill_fame > 0:
+        draw.text((center_x - 35, 93), f"3 x {int(kill_fame/3):,.0f}", fill=(90, 85, 75, 255), font=font_small)
 
-    # Silver / Wartość lootu
-    draw.text((center_x - 50, 145), f"{total_value:,.0f}", fill=(40, 30, 30, 255), font=font_stats)
+    # Silver
+    draw.text((center_x - 35, 135), f"💰 {total_value:,.0f}", fill=(40, 30, 30, 255), font=font_stats)
 
-    # Centralne kółko DEATH ze czaszką
-    circle_center = (center_x, 215)
-    radius = 26
-    draw.ellipse([circle_center[0] - radius, circle_center[1] - radius, circle_center[0] + radius, circle_center[1] + radius], fill=(50, 50, 50, 255))
-    draw.text((center_x - 24, circle_center[1] - 6), "DEATH", fill=(255, 255, 255, 255), font=font_center)
+    # Czaszka / Death
+    circle_center = (center_x, 200)
+    radius = 24
+    draw.ellipse([circle_center[0] - radius, circle_center[1] - radius, circle_center[0] + radius, circle_center[1] + radius], fill=(45, 45, 45, 255))
+    draw.text((center_x - 21, circle_center[1] - 5), "DEATH", fill=(255, 255, 255, 255), font=font_center)
 
-    # Data i godzina pod kółkiem
     if time_str:
-        draw.text((center_x - 45, 250), f"{time_str}", fill=(80, 75, 65, 255), font=font_small)
+        draw.text((center_x - 45, 235), f"{time_str}", fill=(80, 75, 65, 255), font=font_small)
 
-    # ----------------------------------------------------
-    # 4. DOLNA SEKCJA: VICTIM'S INVENTORY (9 kolumn x 3 wiersze)
-    # ----------------------------------------------------
-    inv_y_start = 330
-    draw.text((center_x - 65, inv_y_start - 20), "VICTIM'S INVENTORY", fill=(70, 65, 55, 255), font=font_small)
+    # 4. INVENTORY OFIARY (TYLKO POTRZEBNE PRZEDMIOTY - DYNAMICZNE)
+    if victim_inventory:
+        inv_y = 310
+        draw.text((center_x - 55, inv_y - 18), "VICTIM'S INVENTORY", fill=(70, 65, 55, 255), font=font_small)
 
-    inv_slot_size = 48
-    inv_spacing = 5
-    cols = 9
-    rows = 3
-    total_slots = cols * rows
+        inv_slot_size = 46
+        inv_spacing = 4
+        
+        # Przeznaczamy max 10 slotów w 1 wierszu lub 20 slotów w 2 wierszach
+        items_to_show = victim_inventory[:10]
+        cols = len(items_to_show)
+        if cols < 4:
+            cols = 4 # Minimum 4 puste ramki dla aesthetics
 
-    # Wyśrubowane wycentrowanie całej siatki ekwipunku ofiary
-    grid_w = cols * (inv_slot_size + inv_spacing) - inv_spacing
-    inv_start_x = (canvas_w - grid_w) // 2
+        grid_w = cols * (inv_slot_size + inv_spacing) - inv_spacing
+        inv_start_x = (canvas_w - grid_w) // 2
 
-    for r in range(rows):
-        for c in range(cols):
-            idx = r * cols + c
-            x = inv_start_x + c * (inv_slot_size + inv_spacing)
-            y = inv_y_start + r * (inv_slot_size + inv_spacing)
+        for idx in range(cols):
+            x = inv_start_x + idx * (inv_slot_size + inv_spacing)
+            y = inv_y
 
-            # Slot ekwipunku
             draw.rounded_rectangle([x, y, x + inv_slot_size, y + inv_slot_size], radius=4, fill=(198, 185, 162, 255), outline=(160, 145, 125, 255), width=1)
 
-            if victim_inventory and idx < len(victim_inventory):
+            if idx < len(victim_inventory):
                 item = victim_inventory[idx]
                 if item and item.get("Type"):
                     item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
@@ -266,7 +242,7 @@ async def generate_kill_image(session, killer_name, victim_name, killer_guild, v
 
                     cnt = item.get("Count", 1)
                     if cnt > 1:
-                        draw.text((x + 3, y + inv_slot_size - 14), f"{cnt}", fill=(255, 255, 255, 255), font=font_small)
+                        draw.text((x + 3, y + inv_slot_size - 13), f"x{cnt}", fill=(255, 255, 255, 255), font=font_small)
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -387,48 +363,61 @@ async def check_albion_kills():
 # ==========================================
 # KOMENDY DISCORDA
 # ==========================================
-@bot.tree.command(name="test_kill", description="Wygeneruj testowy obrazek w stylu KillBoard#1")
+# ==========================================
+# KOMENDA SLASH (/test_kill) DLA NOWEGO GENERATORA
+# ==========================================
+@bot.tree.command(name="test_kill", description="Wygeneruj testowy obrazek killboardu w stylu KillBoard#1")
 async def test_kill(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
 
+    # Poprawnie zmapowany ekwipunek zabójcy (klucze zgodne z API Albiona)
     mock_killer_equip = {
+        "Head": {"Type": "T5_HEAD_PLATE_HELM", "Quality": 2},
+        "Armor": {"Type": "T5_ARMOR_CLOTH_SET", "Quality": 1},
+        "Cape": {"Type": "T4_CAPE", "Quality": 1},
         "MainHand": {"Type": "T8_MAIN_SWORD", "Quality": 3},
-        "Armor": {"Type": "T8_ARMOR_LEATHER_SET", "Quality": 2},
-        "Head": {"Type": "T8_HEAD_LEATHER", "Quality": 1},
-        "Shoes": {"Type": "T8_SHOES_LEATHER", "Quality": 1},
-        "Cape": {"Type": "T8_CAPE", "Quality": 1},
+        "OffHand": None,
+        "Food": {"Type": "T8_MEAL_STEW", "Quality": 1},
+        "Shoes": {"Type": "T5_SHOES_LEATHER", "Quality": 1},
         "Potion": {"Type": "T8_POTION_HEAL", "Quality": 1},
-        "Food": {"Type": "T8_MEAL_STEW", "Quality": 1}
+        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1}
     }
+
+    # Poprawnie zmapowany ekwipunek ofiary
     mock_victim_equip = {
-        "MainHand": {"Type": "T7_MAIN_AXE", "Quality": 2},
-        "Armor": {"Type": "T7_ARMOR_PLATE", "Quality": 1},
         "Head": {"Type": "T7_HEAD_PLATE", "Quality": 1},
+        "Armor": {"Type": "T7_ARMOR_PLATE", "Quality": 1},
+        "Cape": {"Type": "T4_CAPE", "Quality": 1},
+        "MainHand": {"Type": "T7_MAIN_AXE", "Quality": 2},
+        "OffHand": None,
+        "Food": {"Type": "T7_MEAL_STEW", "Quality": 1},
         "Shoes": {"Type": "T7_SHOES_PLATE", "Quality": 1},
-        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1},
-        "Food": {"Type": "T7_MEAL_STEW", "Quality": 1}
+        "Potion": {"Type": "T6_POTION_HEAL", "Quality": 1},
+        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1}
     }
+
+    # Testowy plecak (inventory) ofiary
     mock_inventory = [
         {"Type": "T8_ORE", "Count": 120},
         {"Type": "T6_POTION_HEAL", "Count": 15},
-        {"Type": "T7_MEAL_STEW", "Count": 5},
         {"Type": "T8_BAG", "Count": 1}
     ]
 
     async with aiohttp.ClientSession() as session:
         img_buffer = await generate_kill_image(
-            session, 
-            killer_name="AwesomeNinja", 
-            victim_name="MitchDagger", 
-            killer_guild="BYOT", 
-            victim_guild="G3rm Craft", 
-            killer_equip=mock_killer_equip, 
-            victim_equip=mock_victim_equip, 
+            session=session,
+            killer_name="AwesomeNinja",
+            victim_name="MitchDagger",
+            killer_guild="BYOT",
+            victim_guild="G3rm Craft",
+            killer_equip=mock_killer_equip,
+            victim_equip=mock_victim_equip,
             victim_inventory=mock_inventory,
             kill_fame=2853543,
             total_value=102530668,
             time_str="22:49 03 Jan 2026"
         )
+        
         file = discord.File(fp=img_buffer, filename="killboard.png")
         
         embed = discord.Embed(
