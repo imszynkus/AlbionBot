@@ -139,7 +139,7 @@ async def check_albion_kills():
     base_url = API_URLS.get(region, API_URLS["europe"])
 
     async with aiohttp.ClientSession() as session:
-        url = f"{base_url}/events?limit=100&offset=0"
+        url = f"{base_url}/events?limit=51&offset=0"
         try:
             async with session.get(url, timeout=10) as resp:
                 if resp.status != 200:
