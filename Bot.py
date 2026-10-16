@@ -128,70 +128,101 @@ async def fetch_item_image(session, item_type, quality=1):
 # ==========================================
 # LOKALNY GENERATOR GRAFIKI (PILLOW)
 # ==========================================
-async def generate_kill_image(session, killer_equip, victim_equip, victim_inventory):
-    canvas_w, canvas_h = 750, 420
-    bg_color = (24, 25, 28, 255) # Nowoczesne ciemne tło Discord/Albion
+# ==========================================
+# ODŚWIEŻONY & PRECYZYJNY GENERATOR GRAFIKI (PILLOW)
+# ==========================================
+async def generate_kill_image(session, killer_name, victim_name, killer_ip, victim_ip, killer_equip, victim_equip, victim_inventory):
+    # Większa wysokość canvasu, aby zmieścić nagłówki oraz odstęp dla plecaka
+    canvas_w, canvas_h = 780, 520
+    bg_color = (20, 22, 26, 255) # Ciemne tło w stylu Albion
     img = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
     draw = ImageDraw.Draw(img)
 
     slot_size = 64
-    spacing = 8
+    spacing = 6
     
-    # Układ ekwipunku Albiona w siatce (Kolumna, Wiersz)
+    # Próba wczytania czcionki domyślnej
+    try:
+        font_large = ImageFont.truetype("arial.ttf", 20)
+        font_small = ImageFont.truetype("arial.ttf", 13)
+    except Exception:
+        font_large = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+
+    # 1. NAGŁÓWKI Z NICKAMI I IP (NAD EKWIPUNKIEM)
+    # Zabójca (po lewej)
+    draw.text((50, 20), f"{killer_name}", fill=(100, 220, 100, 255), font=font_large)
+    draw.text((50, 48), f"🛡️ {killer_ip} IP", fill=(170, 175, 185, 255), font=font_small)
+
+    # Ofiara (po prawej)
+    draw.text((470, 20), f"{victim_name}", fill=(230, 90, 90, 255), font=font_large)
+    draw.text((470, 48), f"🛡️ {victim_ip} IP", fill=(170, 175, 185, 255), font=font_small)
+
+    # 2. PEŁNA SIATKA EKWIPUNKU ALBIONA (3x4)
+    # Układ: (Kolumna, Wiersz)
     layout = {
-        "Head": (1, 0), "Armor": (1, 1), "Shoes": (1, 2),
-        "MainHand": (0, 1), "OffHand": (2, 1),
-        "Cape": (2, 0), "Mount": (1, 3),
-        "Food": (0, 2), "Potion": (0, 0)
+        "Potion": (0, 0), "Head": (1, 0), "Cape": (2, 0),
+        "MainHand": (0, 1), "Armor": (1, 1), "OffHand": (2, 1),
+        "Food": (0, 2), "Shoes": (1, 2),
+        "Mount": (1, 3)
     }
 
-    # Rysowanie ekwipunku Zabójcy (Po lewej)
-    start_x_killer = 40
-    start_y = 30
+    start_y = 80
+    start_x_killer = 50
+    start_x_victim = 470
+
+    # Rysowanie ekwipunku Zabójcy
     for slot, pos in layout.items():
-        item = killer_equip.get(slot)
+        item = killer_equip.get(slot) if killer_equip else None
         x = start_x_killer + pos[0] * (slot_size + spacing)
         y = start_y + pos[1] * (slot_size + spacing)
         
-        # Ramka slotu
-        draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=6, fill=(35, 37, 43, 255), outline=(54, 57, 65, 255), width=2)
+        draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=6, fill=(32, 34, 40, 255), outline=(55, 60, 70, 255), width=2)
         if item and item.get("Type"):
             item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
             if item_img:
-                item_img = item_img.resize((slot_size - 6, slot_size - 6))
-                img.paste(item_img, (x + 3, y + 3), item_img)
+                # Docięcie/skalowanie idealnie do brzegu ramki
+                item_img = item_img.resize((slot_size - 2, slot_size - 2))
+                img.paste(item_img, (x + 1, y + 1), item_img)
 
-    # Rysowanie ekwipunku Ofiary (Po prawej)
-    start_x_victim = 450
+    # Rysowanie ekwipunku Ofiary
     for slot, pos in layout.items():
-        item = victim_equip.get(slot)
+        item = victim_equip.get(slot) if victim_equip else None
         x = start_x_victim + pos[0] * (slot_size + spacing)
         y = start_y + pos[1] * (slot_size + spacing)
         
-        draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=6, fill=(35, 37, 43, 255), outline=(54, 57, 65, 255), width=2)
+        draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=6, fill=(32, 34, 40, 255), outline=(55, 60, 70, 255), width=2)
         if item and item.get("Type"):
             item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
             if item_img:
-                item_img = item_img.resize((slot_size - 6, slot_size - 6))
-                img.paste(item_img, (x + 3, y + 3), item_img)
+                item_img = item_img.resize((slot_size - 2, slot_size - 2))
+                img.paste(item_img, (x + 1, y + 1), item_img)
 
-    # Etykieta VS na środku
-    draw.text((canvas_w // 2 - 12, 130), "VS", fill=(140, 145, 155, 255))
+    # Np. "VS" na środku
+    draw.text((canvas_w // 2 - 12, 180), "VS", fill=(120, 125, 135, 255), font=font_large)
 
-    # Plecak Ofiary na dole (Loot)
+    # 3. PLECAK OFIARY (LOOT) - OBNIŻONY I WYŚRODKOWANY
     if victim_inventory:
-        draw.text((40, 310), "Plecak / Loot ofiary:", fill=(180, 185, 195, 255))
-        inv_slot_size = 48
+        inv_y_start = 390
+        draw.text((50, inv_y_start - 25), "📦 Loot / Plecak ofiary:", fill=(160, 165, 175, 255), font=font_small)
+        
+        inv_slot_size = 54
         inv_spacing = 6
-        for idx, item in enumerate(victim_inventory[:10]):
-            x = 40 + idx * (inv_slot_size + inv_spacing)
-            y = 335
-            draw.rounded_rectangle([x, y, x + inv_slot_size, y + inv_slot_size], radius=4, fill=(30, 32, 38, 255), outline=(48, 52, 60, 255))
+        for idx, item in enumerate(victim_inventory[:11]):
+            x = 50 + idx * (inv_slot_size + inv_spacing)
+            y = inv_y_start
+            
+            draw.rounded_rectangle([x, y, x + inv_slot_size, y + inv_slot_size], radius=4, fill=(26, 28, 34, 255), outline=(45, 50, 60, 255))
             if item and item.get("Type"):
                 item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
                 if item_img:
-                    item_img = item_img.resize((inv_slot_size - 4, inv_slot_size - 4))
-                    img.paste(item_img, (x + 2, y + 2), item_img)
+                    item_img = item_img.resize((inv_slot_size - 2, inv_slot_size - 2))
+                    img.paste(item_img, (x + 1, y + 1), item_img)
+                
+                # Wyświetlanie ilości (np. x120)
+                cnt = item.get("Count", 1)
+                if cnt > 1:
+                    draw.text((x + 4, y + inv_slot_size - 16), f"x{cnt}", fill=(255, 255, 255, 255), font=font_small)
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -296,20 +327,22 @@ async def check_albion_kills():
 async def test_kill(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
 
-    # Przykładowe przedmioty do testu graficznego
     mock_killer_equip = {
         "MainHand": {"Type": "T8_MAIN_SWORD", "Quality": 3},
         "Armor": {"Type": "T8_ARMOR_LEATHER_SET", "Quality": 2},
         "Head": {"Type": "T8_HEAD_LEATHER", "Quality": 1},
         "Shoes": {"Type": "T8_SHOES_LEATHER", "Quality": 1},
-        "Cape": {"Type": "T8_CAPE", "Quality": 1}
+        "Cape": {"Type": "T8_CAPE", "Quality": 1},
+        "Potion": {"Type": "T8_POTION_HEAL", "Quality": 1},
+        "Food": {"Type": "T8_MEAL_STEW", "Quality": 1}
     }
     mock_victim_equip = {
         "MainHand": {"Type": "T7_MAIN_AXE", "Quality": 2},
         "Armor": {"Type": "T7_ARMOR_PLATE", "Quality": 1},
         "Head": {"Type": "T7_HEAD_PLATE", "Quality": 1},
         "Shoes": {"Type": "T7_SHOES_PLATE", "Quality": 1},
-        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1}
+        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1},
+        "Food": {"Type": "T7_MEAL_STEW", "Quality": 1}
     }
     mock_inventory = [
         {"Type": "T8_ORE", "Count": 120},
@@ -319,12 +352,20 @@ async def test_kill(interaction: discord.Interaction):
     ]
 
     async with aiohttp.ClientSession() as session:
-        img_buffer = await generate_kill_image(session, mock_killer_equip, mock_victim_equip, mock_inventory)
+        img_buffer = await generate_kill_image(
+            session, 
+            killer_name="VamppSlayer", 
+            victim_name="Szynkus", 
+            killer_ip=1420, 
+            victim_ip=1280, 
+            killer_equip=mock_killer_equip, 
+            victim_equip=mock_victim_equip, 
+            victim_inventory=mock_inventory
+        )
         file = discord.File(fp=img_buffer, filename="killboard.png")
         
         embed = discord.Embed(
-            title="🧪 TESTOWY KILLBOARD (Pillow Preview)",
-            description="Tak wygląda lokalnie generowany kolaż graficzny ekwipunku i plecaka.",
+            title="🧪 TESTOWY KILLBOARD (Nowa Wersja)",
             color=discord.Color.blurple()
         )
         embed.set_image(url="attachment://killboard.png")
