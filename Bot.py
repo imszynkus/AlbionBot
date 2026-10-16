@@ -6,7 +6,6 @@ import os
 import io
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from PIL import Image, ImageDraw, ImageFont
 
 # ==========================================
 # SERWER HTTP (DLA WEBSERVICE RENDER)
@@ -75,7 +74,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
-# POMOCNICZE: POBIERANIE CEN I GENEROWANIE GRAFIKI
+# POMOCNICZE: POBIERANIE CEN I WARTOŚCI
 # ==========================================
 async def get_item_prices(session, item_ids, region):
     if not item_ids:
@@ -111,83 +110,6 @@ def calculate_equipment_value(equipment_dict, prices):
             total_val += prices.get(item_type, 0) * count
     return total_val
 
-async def fetch_item_image(session, item_type, quality=1):
-    if not item_type:
-        return None
-    url = f"https://render.albiononline.com/v1/item/{item_type}.png?quality={quality}"
-    try:
-        async with session.get(url, timeout=5) as resp:
-            if resp.status == 200:
-                data = await resp.read()
-                img = Image.open(io.BytesIO(data)).convert("RGBA")
-                return img
-    except Exception:
-        pass
-    return None
-
-async def generate_kill_image(session, killer_equip, victim_equip, victim_inventory):
-    # Szerokość i wysokość tła
-    canvas_w, canvas_h = 750, 360
-    bg_color = (28, 29, 34, 255) # Ciemnoszare tło jak w KillBoard#1
-    img = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
-    draw = ImageDraw.Draw(img)
-
-    slot_size = 70
-    
-    # Układ slotów ekwipunku (X, Y)
-    layout = {
-        "Head": (1, 0), "Armor": (1, 1), "Shoes": (1, 2),
-        "MainHand": (0, 1), "OffHand": (2, 1),
-        "Cape": (2, 0), "Mount": (1, 3),
-        "Food": (0, 2), "Potion": (0, 0)
-    }
-
-    # Rysowanie ekwipunku Zabójcy (Po lewej stronie)
-    for slot, pos in layout.items():
-        item = killer_equip.get(slot)
-        x = 40 + pos[0] * (slot_size + 8)
-        y = 30 + pos[1] * (slot_size + 8)
-        draw.rectangle([x, y, x + slot_size, y + slot_size], fill=(42, 44, 52, 255), outline=(60, 64, 75, 255), width=2)
-        if item:
-            item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
-            if item_img:
-                item_img = item_img.resize((slot_size, slot_size))
-                img.paste(item_img, (x, y), item_img)
-
-    # Rysowanie ekwipunku Ofiary (Po prawej stronie)
-    for slot, pos in layout.items():
-        item = victim_equip.get(slot)
-        x = 470 + pos[0] * (slot_size + 8)
-        y = 30 + pos[1] * (slot_size + 8)
-        draw.rectangle([x, y, x + slot_size, y + slot_size], fill=(42, 44, 52, 255), outline=(60, 64, 75, 255), width=2)
-        if item:
-            item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
-            if item_img:
-                item_img = item_img.resize((slot_size, slot_size))
-                img.paste(item_img, (x, y), item_img)
-
-    # Linia podziału / Napis w środku
-    draw.text((canvas_w // 2 - 15, 140), "VS", fill=(200, 200, 200, 255))
-
-    # Plecak Ofiary na dole (Loot)
-    if victim_inventory:
-        draw.text((40, 280), "Plecak ofiary:", fill=(170, 170, 170, 255))
-        inv_slot_size = 50
-        for idx, item in enumerate(victim_inventory[:10]):
-            x = 40 + idx * (inv_slot_size + 6)
-            y = 300
-            draw.rectangle([x, y, x + inv_slot_size, y + inv_slot_size], fill=(35, 37, 44, 255), outline=(55, 58, 68, 255))
-            if item:
-                item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
-                if item_img:
-                    item_img = item_img.resize((inv_slot_size, inv_slot_size))
-                    img.paste(item_img, (x, y), item_img)
-
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    buffer.seek(0)
-    return buffer
-
 # ==========================================
 # PĘTLA SPRAWDZAJĄCA KILLBOARD
 # ==========================================
@@ -199,8 +121,6 @@ async def check_albion_kills():
     tracked = config.get("tracked_players", [])
     main_chan_id = config.get("main_channel_id")
     
-    print(f"[PĘTLA] Śledzeni gracze: {tracked} | Kanał ID: {main_chan_id}", flush=True)
-
     if not tracked or not main_chan_id:
         return
 
@@ -219,12 +139,9 @@ async def check_albion_kills():
         try:
             async with session.get(url, timeout=10) as resp:
                 if resp.status != 200:
-                    print(f"[API ERROR] Kod odpowiedzi API: {resp.status}", flush=True)
                     return
                 events = await resp.json()
-                print(f"[API OK] Pobrano {len(events)} ostatnich zdarzeń z serwera ({region.upper()}).", flush=True)
-        except Exception as e:
-            print(f"[API ERROR] Błąd połączenia: {e}", flush=True)
+        except Exception:
             return
 
         tracked_lower = [t.lower() for t in tracked]
@@ -252,115 +169,101 @@ async def check_albion_kills():
 
             print(f"[KILLS] WYKRYTO KILL! Zabójca: {killer_name} | Ofiara: {victim_name}", flush=True)
 
+            # Obliczanie wartości lootu
             victim_equip = event.get("Victim", {}).get("Equipment", {})
-            killer_equip = event.get("Killer", {}).get("Equipment", {})
             victim_inventory = [item for item in event.get("Victim", {}).get("Inventory", []) if item]
-
             all_items = [item.get("Type") for item in victim_equip.values() if item]
             all_items += [item.get("Type") for item in victim_inventory if item]
-            prices = await get_item_prices(session, all_items, region)
             
+            prices = await get_item_prices(session, all_items, region)
             equip_value = calculate_equipment_value(victim_equip, prices)
             inv_value = sum(prices.get(i.get("Type"), 0) * i.get("Count", 1) for i in victim_inventory)
             total_value = equip_value + inv_value
-            kill_fame = event.get("TotalVictimKillFame", 0)
-
-            val_str = f"{total_value / 1_000_000:.2f}M" if total_value >= 1_000_000 else f"{total_value / 1_000:.0f}k" if total_value >= 1_000 else "0"
-            fame_str = f"{kill_fame / 1_000_000:.2f}M" if kill_fame >= 1_000_000 else f"{kill_fame / 1_000:.0f}k" if kill_fame >= 1_000 else f"{kill_fame}"
 
             threshold = config.get("high_value_threshold", 15000000)
 
-            # Generowanie obrazka
-            img_buffer = await generate_kill_image(session, killer_equip, victim_equip, victim_inventory)
-            file = discord.File(fp=img_buffer, filename="killboard.png")
+            # Pobieranie profesjonalnie wyrenderowanej grafiki starcia
+            img_url = f"https://render.albionkillbot.com/event/{event_id}.png"
+            img_bytes = None
+            try:
+                async with session.get(img_url, timeout=10) as img_resp:
+                    if img_resp.status == 200:
+                        img_bytes = await img_resp.read()
+            except Exception as e:
+                print(f"[RENDER ERROR] {e}", flush=True)
 
             embed_color = discord.Color.green() if is_killer else discord.Color.red() if is_victim else discord.Color.gold()
-
+            
             embed = discord.Embed(
-                title=f"⚔️ {killer_name}  ━━━  killed  ━━━  {victim_name}",
+                title=f"⚔️ {killer_name}  ➔  {victim_name}",
                 url=f"https://albiononline.com/killboard/kill/{event_id}",
                 color=embed_color
             )
 
-            k_guild = event.get('Killer', {}).get('GuildName') or 'Brak'
-            v_guild = event.get('Victim', {}).get('GuildName') or 'Brak'
-            k_ip = round(event.get("Killer", {}).get("AverageItemPower", 0))
-            v_ip = round(event.get("Victim", {}).get("AverageItemPower", 0))
-
-            embed.add_field(name="🗡️ Zabójca", value=f"**{killer_name}** (`{k_ip} IP`)\n🏰 *{k_guild}*", inline=True)
-            embed.add_field(name="🎯 Ofiara", value=f"**{victim_name}** (`{v_ip} IP`)\n🏰 *{v_guild}*", inline=True)
-            embed.add_field(name="📊 Statystyki", value=f"☠️ Fame: `{fame_str}`\n💰 Loot: `{val_str} Silver`", inline=True)
-
-            embed.set_image(url="attachment://killboard.png")
-            embed.set_footer(text=f"Albion Online Killbot • Server: {region.upper()} • Event ID: {event_id}")
-
-            try:
-                await main_channel.send(file=file, embed=embed)
-                print(f"[SUCCESS] Wysłano graficzne powiadomienie o killu!", flush=True)
-            except Exception as send_error:
-                print(f"[DISCORD ERROR] Błąd wysyłania: {send_error}", flush=True)
+            if img_bytes:
+                buffer = io.BytesIO(img_bytes)
+                file = discord.File(fp=buffer, filename="killboard.png")
+                embed.set_image(url="attachment://killboard.png")
+                
+                try:
+                    await main_channel.send(file=file, embed=embed)
+                    print(f"[SUCCESS] Wysłano profesjonalny układ graficzny!", flush=True)
+                except Exception as send_error:
+                    print(f"[DISCORD ERROR] {send_error}", flush=True)
+            else:
+                await main_channel.send(embed=embed)
 
             if total_value >= threshold and big_channel:
-                img_buffer.seek(0)
-                big_file = discord.File(fp=img_buffer, filename="killboard.png")
-                await big_channel.send(
-                    content=f"🚨 **BIG KILL / LEGENDARNY LOOT (> {threshold/1_000_000:.0f}M)!** 🚨",
-                    file=big_file,
-                    embed=embed
-                )
+                if img_bytes:
+                    buffer.seek(0)
+                    big_file = discord.File(fp=buffer, filename="killboard.png")
+                    await big_channel.send(
+                        content=f"🚨 **BIG KILL / LEGENDARNY LOOT (> {threshold/1_000_000:.0f}M)!** 🚨",
+                        file=big_file,
+                        embed=embed
+                    )
+                else:
+                    await big_channel.send(content=f"🚨 **BIG KILL!** 🚨", embed=embed)
 
 # ==========================================
-# COMMANDS / SLASH COMMANDS
+# KOMENDY DISCORDA (SLASH COMMANDS)
 # ==========================================
 @bot.tree.command(name="dodaj", description="Dodaj nowego gracza do śledzenia")
 async def dodaj(interaction: discord.Interaction, nick: str):
     if nick in config["tracked_players"]:
         await interaction.response.send_message(f"⚠️ Gracz **{nick}** jest już na liście.", ephemeral=True)
         return
-    
     config["tracked_players"].append(nick)
     save_config(config)
-    await interaction.response.send_message(f"✅ Dodano gracza **{nick}** do monitorowania PK.", ephemeral=False)
+    await interaction.response.send_message(f"✅ Dodano gracza **{nick}** do monitorowania.", ephemeral=False)
 
 @bot.tree.command(name="usun", description="Usuń gracza ze śledzenia")
 async def usun(interaction: discord.Interaction, nick: str):
     if nick not in config["tracked_players"]:
         await interaction.response.send_message(f"❌ Gracz **{nick}** nie znajduje się na liście.", ephemeral=True)
         return
-    
     config["tracked_players"].remove(nick)
     save_config(config)
-    await interaction.response.send_message(f"🗑️ Usunięto gracza **{nick}** ze śledzenia.", ephemeral=False)
+    await interaction.response.send_message(f"🗑️ Usunięto gracza **{nick}**.", ephemeral=False)
 
-@bot.tree.command(name="lista", description="Wyświetl listę śledzonych graczy i konfigurację")
+@bot.tree.command(name="lista", description="Wyświetl listę śledzonych graczy")
 async def lista(interaction: discord.Interaction):
     players = config["tracked_players"]
-    players_str = "\n".join([f"• {p}" for p in players]) if players else "Brak graczy"
-    
+    players_str = "\n".join([f"• {p}" for p in players]) if players else "Brak"
     main_ch = f"<#{config['main_channel_id']}>" if config['main_channel_id'] else "Nie ustawiono"
-    big_ch = f"<#{config['big_channel_id']}>" if config['big_channel_id'] else "Brak (wyłączone)"
-    threshold_mln = config['high_value_threshold'] / 1_000_000
-
-    embed = discord.Embed(title="⚙️ Konfiguracja Killbota Albion", color=discord.Color.blurple())
-    embed.add_field(name="🌍 Region Serwera", value=config['server_region'].upper(), inline=True)
-    embed.add_field(name="💰 Próg Big Kill", value=f"{threshold_mln:.1f}M Silver", inline=True)
-    embed.add_field(name="📢 Kanał Główny", value=main_ch, inline=False)
-    embed.add_field(name="🚨 Kanał Big Kills", value=big_ch, inline=False)
-    embed.add_field(name=f"👥 Śledzeni gracze ({len(players)})", value=players_str[:1024], inline=False)
     
+    embed = discord.Embed(title="⚙️ Konfiguracja Killbota", color=discord.Color.blurple())
+    embed.add_field(name="🌍 Region", value=config['server_region'].upper(), inline=True)
+    embed.add_field(name="📢 Kanał Główny", value=main_ch, inline=False)
+    embed.add_field(name=f"👥 Śledzeni gracze ({len(players)})", value=players_str, inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
-@bot.tree.command(name="ustaw_kanaly", description="Ustaw kanały powiadomień")
+@bot.tree.command(name="ustaw_kanaly", description="Ustaw kanał powiadomień")
 async def ustaw_kanaly(interaction: discord.Interaction, glowny: discord.TextChannel, duze_kille: discord.TextChannel = None):
     config["main_channel_id"] = glowny.id
     config["big_channel_id"] = duze_kille.id if duze_kille else None
     save_config(config)
-    
-    msg = f"✅ Ustawiono główny kanał powiadomień na {glowny.mention}!"
-    if duze_kille:
-        msg += f"\n🚨 Ustawiono kanał na kille > {config['high_value_threshold']/1_000_000:.0f}M na {duze_kille.mention}!"
-    
-    await interaction.response.send_message(msg, ephemeral=False)
+    await interaction.response.send_message(f"✅ Ustawiono główny kanał na {glowny.mention}!", ephemeral=False)
 
 @bot.event
 async def on_ready():
@@ -382,6 +285,6 @@ if __name__ == "__main__":
 
     TOKEN = os.getenv("DISCORD_TOKEN")
     if not TOKEN:
-        print("❌ BŁĄD: Brak zmiennej środowiskowej DISCORD_TOKEN!", flush=True)
+        print("❌ BŁĄD: Brak zmiennej DISCORD_TOKEN!", flush=True)
     else:
         bot.run(TOKEN)
