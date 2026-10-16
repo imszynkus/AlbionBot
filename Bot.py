@@ -133,114 +133,118 @@ async def generate_kill_image(session, killer_name, victim_name, killer_guild, v
                                 killer_equip, victim_equip, victim_inventory, 
                                 kill_fame=0, total_value=0, time_str=""):
 
-    canvas_w, canvas_h = 700, 520
-    # Jasne tło papierowe w stylu KillBoard#1
-    bg_color = (219, 203, 180, 255)
+    canvas_w, canvas_h = 720, 480
+    bg_color = (219, 203, 180, 255) # Tło papierowe KillBoard#1
     img = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
     draw = ImageDraw.Draw(img)
 
-    slot_size = 54
-    spacing = 5
+    slot_size = 56
+    spacing = 6
 
     try:
         font_name = ImageFont.truetype("arial.ttf", 16)
         font_guild = ImageFont.truetype("arial.ttf", 12)
         font_stats = ImageFont.truetype("arial.ttf", 14)
-        font_small = ImageFont.truetype("arial.ttf", 10)
+        font_small = ImageFont.truetype("arial.ttf", 11)
     except Exception:
         font_name = font_guild = font_stats = font_small = ImageFont.load_default()
 
-    # 1. NICKI I GILDIE
-    # Zabójca
-    draw.text((80, 15), f"{killer_name}", fill=(0, 0, 0, 255), font=font_name)
-    draw.text((80, 35), f"{killer_guild}", fill=(80, 80, 80, 255), font=font_guild)
-
-    # Ofiara
-    draw.text((500, 15), f"{victim_name}", fill=(0, 0, 0, 255), font=font_name)
-    draw.text((500, 35), f"{victim_guild}", fill=(80, 80, 80, 255), font=font_guild)
-
-    # 2. EKWIPUNEK (UKŁAD SIATKI ALBIONA)
+    # 1. POPRAWIONE SIATKI EKWIPUNKU (POZYCJE SLOTÓW ALBIONA)
+    # Slot layout: (Kolumna 0..2, Wiersz 0..3)
     layout = {
-        "Head": (0, 0), "Armor": (0, 1), "Shoes": (0, 2),
-        "MainHand": (1, 1), "OffHand": (2, 1),
-        "Cape": (2, 0), "Mount": (0, 3),
-        "Food": (1, 2), "Potion": (2, 2)
+        "Potion": (0, 0), "Head": (1, 0), "Cape": (2, 0),
+        "MainHand": (0, 1), "Armor": (1, 1), "OffHand": (2, 1),
+        "Food": (0, 2), "Shoes": (1, 2),
+        "Mount": (1, 3)
     }
 
-    start_y = 60
-    start_x_killer = 40
-    start_x_victim = 480
+    start_y = 65
+    start_x_killer = 45
+    start_x_victim = 485
 
+    # Nagłówki Graczy (Dokładnie nad ich siatkami)
+    draw.text((start_x_killer, 18), f"{killer_name}", fill=(0, 0, 0, 255), font=font_name)
+    draw.text((start_x_killer, 38), f"{killer_guild or 'Brak Gildii'}", fill=(80, 80, 80, 255), font=font_guild)
+
+    draw.text((start_x_victim, 18), f"{victim_name}", fill=(0, 0, 0, 255), font=font_name)
+    draw.text((start_x_victim, 38), f"{victim_guild or 'Brak Gildii'}", fill=(80, 80, 80, 255), font=font_guild)
+
+    # Rysowanie kratek ekwipunku
     async def draw_grid(start_x, equip):
         for slot, pos in layout.items():
             x = start_x + pos[0] * (slot_size + spacing)
             y = start_y + pos[1] * (slot_size + spacing)
             
-            # Ramka slofów z zakrzywionym brzegiem
-            draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=4, fill=(195, 178, 155, 255), outline=(160, 142, 118, 255), width=2)
+            # Ramka z tłem
+            draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=5, fill=(195, 178, 155, 255), outline=(155, 138, 115, 255), width=2)
             
             item = equip.get(slot) if equip else None
             if item and item.get("Type"):
                 item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
                 if item_img:
-                    item_img = item_img.resize((slot_size + 10, slot_size + 10))
-                    img.paste(item_img, (x - 5, y - 5), item_img)
+                    # Dopasowanie grafiki do ramki
+                    item_img = item_img.resize((slot_size + 8, slot_size + 8))
+                    img.paste(item_img, (x - 4, y - 4), item_img)
 
     await draw_grid(start_x_killer, killer_equip)
     await draw_grid(start_x_victim, victim_equip)
 
-    # 3. ŚRODKOWA SEKCJA STATYSTYK (KILLBOARD STYLE)
+    # 2. STATYSTYKI W CENTRUM (WYŚRODKOWANE)
     center_x = canvas_w // 2
 
-    # Fame
-    fame_val_str = f"{kill_fame:,}"
-    draw.text((center_x - 30, start_y + 20), "💎 Fame", fill=(120, 30, 30, 255), font=font_small)
-    draw.text((center_x - 30, start_y + 35), f"{fame_val_str}", fill=(0, 0, 0, 255), font=font_stats)
-
-    # Loot
     val_str = f"{total_value:,}"
-    draw.text((center_x - 30, start_y + 70), "💰 Silver", fill=(100, 80, 20, 255), font=font_small)
-    draw.text((center_x - 30, start_y + 85), f"{val_str}", fill=(0, 0, 0, 255), font=font_stats)
+    fame_val_str = f"{kill_fame:,}"
 
-    # Czas
-    draw.text((center_x - 35, start_y + 130), f"{time_str or 'Zabójstwo'}", fill=(80, 80, 80, 255), font=font_small)
+    # Fame
+    draw.text((center_x - 35, start_y + 25), "☠️ Fame", fill=(120, 30, 30, 255), font=font_small)
+    draw.text((center_x - 35, start_y + 42), f"{fame_val_str}", fill=(10, 10, 10, 255), font=font_stats)
 
-    # 4. PLECAK (VICTIM'S INVENTORY) NA DOLE
-    inv_y = 330
-    draw.text((center_x - 60, inv_y - 20), "VICTIM'S INVENTORY", fill=(60, 60, 60, 255), font=font_small)
+    # Silver / Loot
+    draw.text((center_x - 35, start_y + 80), "💰 Silver", fill=(100, 75, 15, 255), font=font_small)
+    draw.text((center_x - 35, start_y + 97), f"{val_str}", fill=(10, 10, 10, 255), font=font_stats)
 
-    inv_slot_size = 46
-    inv_spacing = 4
-    cols = 10
-    rows = 3
+    # Data
+    if time_str:
+        draw.text((center_x - 45, start_y + 145), f"{time_str}", fill=(70, 70, 70, 255), font=font_small)
 
-    inv_start_x = (canvas_w - (cols * (inv_slot_size + inv_spacing))) // 2
+    # 3. PLECAK (DYNAMICZNIE SKALOWANY - MAX 2 WIERSZE)
+    if victim_inventory:
+        inv_y = 330
+        draw.text((center_x - 65, inv_y - 22), "VICTIM'S INVENTORY", fill=(70, 70, 70, 255), font=font_small)
 
-    for r in range(rows):
-        for c in range(cols):
-            idx = r * cols + c
-            x = inv_start_x + c * (inv_slot_size + inv_spacing)
+        inv_slot_size = 48
+        inv_spacing = 5
+        
+        items_to_draw = victim_inventory[:16] # Max 16 przedmiotów (2 wiersze po 8)
+        cols = min(len(items_to_draw), 8)
+        if cols < 4:
+            cols = 4 # Minimum 4 kratki szerokości dla estetyki
+
+        start_inv_x = (canvas_w - (cols * (inv_slot_size + inv_spacing))) // 2
+
+        for idx, item in enumerate(items_to_draw):
+            c = idx % cols
+            r = idx // cols
+            
+            x = start_inv_x + c * (inv_slot_size + inv_spacing)
             y = inv_y + r * (inv_slot_size + inv_spacing)
 
-            draw.rounded_rectangle([x, y, x + inv_slot_size, y + inv_slot_size], radius=3, fill=(195, 178, 155, 255), outline=(160, 142, 118, 255))
+            draw.rounded_rectangle([x, y, x + inv_slot_size, y + inv_slot_size], radius=4, fill=(195, 178, 155, 255), outline=(155, 138, 115, 255))
 
-            if victim_inventory and idx < len(victim_inventory):
-                item = victim_inventory[idx]
-                if item and item.get("Type"):
-                    item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
-                    if item_img:
-                        item_img = item_img.resize((inv_slot_size + 6, inv_slot_size + 6))
-                        img.paste(item_img, (x - 3, y - 3), item_img)
+            if item and item.get("Type"):
+                item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
+                if item_img:
+                    item_img = item_img.resize((inv_slot_size + 6, inv_slot_size + 6))
+                    img.paste(item_img, (x - 3, y - 3), item_img)
 
-                    cnt = item.get("Count", 1)
-                    if cnt > 1:
-                        draw.text((x + 2, y + inv_slot_size - 12), f"{cnt}", fill=(255, 255, 255, 255), font=font_small)
+                cnt = item.get("Count", 1)
+                if cnt > 1:
+                    draw.text((x + 3, y + inv_slot_size - 13), f"x{cnt}", fill=(255, 255, 255, 255), font=font_small)
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
-
 # ==========================================
 # PĘTLA SPRAWDZAJĄCA KILLBOARD
 # ==========================================
