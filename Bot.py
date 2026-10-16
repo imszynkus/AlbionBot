@@ -319,7 +319,9 @@ async def on_ready():
     except Exception as e:
         print(f"Błąd synchronizacji: {e}")
         
-    check_albion_kills.start()
+    if not check_albion_kills.is_running():
+        check_albion_kills.start()
+        print("⚔️ Pętla sprawdzająca kille została uruchomiona!")
 
 # ==========================================
 # URUCHOMIENIE SERWERA WEB I BOTA
