@@ -127,18 +127,18 @@ async def fetch_item_image(session, item_type, quality=1):
     return None
 
 # ==========================================
-# PRECYZYJNY PIKSELOWO GENERATOR GRAFIKI
+# PERFEKCYJNIE ZBALANOWANY GENERATOR (PILLOW)
 # ==========================================
 async def generate_kill_image(session, killer_name, victim_name, killer_guild, victim_guild, 
                                 killer_equip, victim_equip, victim_inventory, 
                                 kill_fame=0, total_value=0, time_str=""):
 
     canvas_w, canvas_h = 760, 480
-    bg_color = (218, 206, 185, 255) # Tło papierowe KillBoard#1
+    bg_color = (218, 206, 185, 255) # Jasne papierowe tło KillBoard#1
     img = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
     draw = ImageDraw.Draw(img)
 
-    slot_size = 52
+    slot_size = 54
 
     try:
         font_name = ImageFont.truetype("arial.ttf", 15)
@@ -156,8 +156,7 @@ async def generate_kill_image(session, killer_name, victim_name, killer_guild, v
     draw.text((545, 18), f"{victim_name}", fill=(20, 20, 20, 255), font=font_name)
     draw.text((545, 36), f"{victim_guild or 'Brak Gildii'}", fill=(90, 85, 75, 255), font=font_guild)
 
-    # 2. SZTYWNE POZYCJE SLOTÓW EKWIPUNKU (PIXEL PERFECT)
-    # Lewa strona (Zabójca)
+    # 2. SZTYWNE POZYCJE SLOTÓW EKWIPUNKU
     k_slots = {
         "Bag": (45, 65),       "Head": (103, 65),      "Cape": (161, 65),
         "MainHand": (45, 123), "Armor": (103, 123),     "OffHand": (161, 123),
@@ -165,7 +164,6 @@ async def generate_kill_image(session, killer_name, victim_name, killer_guild, v
         "Mount": (103, 239)
     }
 
-    # Prawa strona (Ofiara)
     v_slots = {
         "Bag": (545, 65),      "Head": (603, 65),      "Cape": (661, 65),
         "MainHand": (545, 123),"Armor": (603, 123),    "OffHand": (661, 123),
@@ -175,41 +173,45 @@ async def generate_kill_image(session, killer_name, victim_name, killer_guild, v
 
     async def draw_slots(slots_dict, equip_data):
         for slot_name, (x, y) in slots_dict.items():
-            # Tło slotu (ramka)
+            # Ramka tła
             draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=4, fill=(198, 185, 162, 255), outline=(160, 145, 125, 255), width=2)
             
             item = equip_data.get(slot_name) if equip_data else None
             if item and item.get("Type"):
                 item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
                 if item_img:
-                    # Dopasowanie grafiki idealnie wewnątrz slotu
-                    item_img = item_img.resize((slot_size + 4, slot_size + 4))
-                    img.paste(item_img, (x - 2, y - 2), item_img)
+                    # Dopasowanie ikon – skalowanie ze zdecydowanym wypełnieniem kratek
+                    item_img = item_img.resize((slot_size + 12, slot_size + 12))
+                    img.paste(item_img, (x - 6, y - 6), item_img)
 
     await draw_slots(k_slots, killer_equip)
     await draw_slots(v_slots, victim_equip)
 
-    # 3. CENTRUM (STATYSTYKI / DEATH)
+    # 3. CENTRUM (FAME, SILVER, DEATH)
     center_x = canvas_w // 2
 
-    # Fame
-    draw.text((center_x - 35, 75), f"☠️ {kill_fame:,.0f}", fill=(120, 30, 30, 255), font=font_stats)
+    # Rysowanie ikony Kryształu Fame (Czerwony diament zamiast zepsutej czcionki)
+    fame_icon_x, fame_icon_y = center_x - 48, 77
+    draw.polygon([(fame_icon_x+5, fame_icon_y), (fame_icon_x+10, fame_icon_y+6), (fame_icon_x+5, fame_icon_y+12), (fame_icon_x, fame_icon_y+6)], fill=(150, 40, 40, 255))
+    draw.text((center_x - 32, 73), f"{kill_fame:,.0f}", fill=(120, 30, 30, 255), font=font_stats)
     if kill_fame > 0:
-        draw.text((center_x - 35, 93), f"3 x {int(kill_fame/3):,.0f}", fill=(90, 85, 75, 255), font=font_small)
+        draw.text((center_x - 32, 91), f"3 x {int(kill_fame/3):,.0f}", fill=(90, 85, 75, 255), font=font_small)
 
-    # Silver
-    draw.text((center_x - 35, 135), f"💰 {total_value:,.0f}", fill=(40, 30, 30, 255), font=font_stats)
+    # Rysowanie ikony Silvera (Złota moneta)
+    coin_x, coin_y = center_x - 48, 137
+    draw.ellipse([coin_x, coin_y, coin_x + 10, coin_y + 10], fill=(180, 140, 30, 255), outline=(120, 90, 20, 255))
+    draw.text((center_x - 32, 133), f"{total_value:,.0f}", fill=(40, 30, 30, 255), font=font_stats)
 
-    # Czaszka / Death
+    # Kółko DEATH
     circle_center = (center_x, 200)
     radius = 24
     draw.ellipse([circle_center[0] - radius, circle_center[1] - radius, circle_center[0] + radius, circle_center[1] + radius], fill=(45, 45, 45, 255))
-    draw.text((center_x - 21, circle_center[1] - 5), "DEATH", fill=(255, 255, 255, 255), font=font_center)
+    draw.text((center_x - 20, circle_center[1] - 5), "DEATH", fill=(255, 255, 255, 255), font=font_center)
 
     if time_str:
         draw.text((center_x - 45, 235), f"{time_str}", fill=(80, 75, 65, 255), font=font_small)
 
-    # 4. INVENTORY OFIARY (TYLKO POTRZEBNE PRZEDMIOTY - DYNAMICZNE)
+    # 4. PLECAK (VICTIM'S INVENTORY)
     if victim_inventory:
         inv_y = 310
         draw.text((center_x - 55, inv_y - 18), "VICTIM'S INVENTORY", fill=(70, 65, 55, 255), font=font_small)
@@ -217,11 +219,10 @@ async def generate_kill_image(session, killer_name, victim_name, killer_guild, v
         inv_slot_size = 46
         inv_spacing = 4
         
-        # Przeznaczamy max 10 slotów w 1 wierszu lub 20 slotów w 2 wierszach
         items_to_show = victim_inventory[:10]
         cols = len(items_to_show)
         if cols < 4:
-            cols = 4 # Minimum 4 puste ramki dla aesthetics
+            cols = 4
 
         grid_w = cols * (inv_slot_size + inv_spacing) - inv_spacing
         inv_start_x = (canvas_w - grid_w) // 2
@@ -237,8 +238,8 @@ async def generate_kill_image(session, killer_name, victim_name, killer_guild, v
                 if item and item.get("Type"):
                     item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
                     if item_img:
-                        item_img = item_img.resize((inv_slot_size + 4, inv_slot_size + 4))
-                        img.paste(item_img, (x - 2, y - 2), item_img)
+                        item_img = item_img.resize((inv_slot_size + 8, inv_slot_size + 8))
+                        img.paste(item_img, (x - 4, y - 4), item_img)
 
                     cnt = item.get("Count", 1)
                     if cnt > 1:
@@ -366,41 +367,48 @@ async def check_albion_kills():
 # ==========================================
 # KOMENDA SLASH (/test_kill) DLA NOWEGO GENERATORA
 # ==========================================
-@bot.tree.command(name="test_kill", description="Wygeneruj testowy obrazek killboardu w stylu KillBoard#1")
+@bot.tree.command(name="test_kill", description="Wygeneruj testowy obrazek killboardu z pełnym ekwipunkiem")
 async def test_kill(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
 
-    # Poprawnie zmapowany ekwipunek zabójcy (klucze zgodne z API Albiona)
+    # Pełne 10 slotów dla Zabójcy
     mock_killer_equip = {
-        "Head": {"Type": "T5_HEAD_PLATE_HELM", "Quality": 2},
-        "Armor": {"Type": "T5_ARMOR_CLOTH_SET", "Quality": 1},
-        "Cape": {"Type": "T4_CAPE", "Quality": 1},
+        "Bag": {"Type": "T8_BAG", "Quality": 2},
+        "Head": {"Type": "T8_HEAD_LEATHER", "Quality": 3},
+        "Cape": {"Type": "T8_CAPE", "Quality": 2},
         "MainHand": {"Type": "T8_MAIN_SWORD", "Quality": 3},
-        "OffHand": None,
+        "Armor": {"Type": "T8_ARMOR_LEATHER_SET", "Quality": 2},
+        "OffHand": {"Type": "T8_OFF_TOWER_SHIELD", "Quality": 1},
         "Food": {"Type": "T8_MEAL_STEW", "Quality": 1},
-        "Shoes": {"Type": "T5_SHOES_LEATHER", "Quality": 1},
+        "Shoes": {"Type": "T8_SHOES_LEATHER", "Quality": 2},
         "Potion": {"Type": "T8_POTION_HEAL", "Quality": 1},
-        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1}
+        "Mount": {"Type": "T8_MOUNT_HORSE", "Quality": 1}
     }
 
-    # Poprawnie zmapowany ekwipunek ofiary
+    # Pełne 10 slotów dla Ofiary
     mock_victim_equip = {
-        "Head": {"Type": "T7_HEAD_PLATE", "Quality": 1},
-        "Armor": {"Type": "T7_ARMOR_PLATE", "Quality": 1},
-        "Cape": {"Type": "T4_CAPE", "Quality": 1},
+        "Bag": {"Type": "T7_BAG", "Quality": 1},
+        "Head": {"Type": "T7_HEAD_PLATE", "Quality": 2},
+        "Cape": {"Type": "T7_CAPE", "Quality": 1},
         "MainHand": {"Type": "T7_MAIN_AXE", "Quality": 2},
-        "OffHand": None,
+        "Armor": {"Type": "T7_ARMOR_PLATE", "Quality": 2},
+        "OffHand": {"Type": "T7_OFF_SHIELD", "Quality": 1},
         "Food": {"Type": "T7_MEAL_STEW", "Quality": 1},
         "Shoes": {"Type": "T7_SHOES_PLATE", "Quality": 1},
-        "Potion": {"Type": "T6_POTION_HEAL", "Quality": 1},
-        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1}
+        "Potion": {"Type": "T7_POTION_HEAL", "Quality": 1},
+        "Mount": {"Type": "T7_MOUNT_ARMORED_HORSE", "Quality": 1}
     }
 
-    # Testowy plecak (inventory) ofiary
+    # Duży zestaw przedmiotów w plecaku ofiary
     mock_inventory = [
         {"Type": "T8_ORE", "Count": 120},
         {"Type": "T6_POTION_HEAL", "Count": 15},
-        {"Type": "T8_BAG", "Count": 1}
+        {"Type": "T7_MEAL_STEW", "Count": 5},
+        {"Type": "T8_BAG", "Count": 1},
+        {"Type": "T6_HEAD_CLOTH", "Count": 1},
+        {"Type": "T7_ARMOR_LEATHER", "Count": 2},
+        {"Type": "T8_MOUNT_HORSE", "Count": 1},
+        {"Type": "T6_RUNE", "Count": 250}
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -419,9 +427,8 @@ async def test_kill(interaction: discord.Interaction):
         )
         
         file = discord.File(fp=img_buffer, filename="killboard.png")
-        
         embed = discord.Embed(
-            title="🧪 TESTOWY KILLBOARD (Styl KillBoard#1)",
+            title="🧪 KILLBOARD (Pełny Ekwipunek)",
             color=discord.Color.blurple()
         )
         embed.set_image(url="attachment://killboard.png")
