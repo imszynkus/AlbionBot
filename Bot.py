@@ -116,12 +116,15 @@ def calculate_equipment_value(equipment_dict, prices):
 # ==========================================
 @tasks.loop(seconds=30)
 async def check_albion_kills():
+    print("[Sprawdzanie] Pętla wystartowała, odpytuję API Albiona...")
+    
     tracked = config.get("tracked_players", [])
     main_chan_id = config.get("main_channel_id")
     
     if not tracked or not main_chan_id:
-        print("[Sprawdzanie] Brak śledzonych graczy lub brakuje ustawionego kanału.")
+        print(f"[Sprawdzanie] Pomijam – brak graczy ({tracked}) lub kanału ({main_chan_id}).")
         return
+
 
     print(f"[Sprawdzanie] Odpytuję API Albiona... Śledzeni gracze: {tracked}")
 
