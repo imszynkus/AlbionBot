@@ -143,10 +143,12 @@ async def check_albion_kills():
         try:
             async with session.get(url) as resp:
                 if resp.status != 200:
+                    print(f"[API Error] Błąd odpowiedzi serwera Albiona: Status {resp.status}")
                     return
                 events = await resp.json()
+                print(f"[API] Pobrano {len(events)} ostatnich zdarzeń z API Albiona.")
         except Exception as e:
-            print(f"[API Error] {e}")
+            print(f"[API Error] Wyjątek podczas połączenia z API: {e}")
             return
 
         for event in reversed(events):
