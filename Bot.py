@@ -300,4 +300,11 @@ async def on_ready():
         
     check_albion_kills.start()
 
-bot.run("TWÓJ_TOKEN_DISCORD")
+# Pobiera token ze zmiennych środowiskowych systemu (np. z panelu Render)
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+if not TOKEN:
+    print("❌ BŁĄD: Brak zmiennej środowiskowej DISCORD_TOKEN!")
+else:
+    bot.run(TOKEN)
+
