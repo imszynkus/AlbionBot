@@ -6,6 +6,7 @@ import os
 import io
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from PIL import Image, ImageDraw, ImageFont
 
 # ==========================================
 # SERWER HTTP (DLA WEBSERVICE RENDER)
@@ -74,7 +75,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ==========================================
-# POMOCNICZE: POBIERANIE CEN I WARTOŚCI
+# POMOCNICZE: POBIERANIE CEN I IKON
 # ==========================================
 async def get_item_prices(session, item_ids, region):
     if not item_ids:
@@ -109,6 +110,93 @@ def calculate_equipment_value(equipment_dict, prices):
             count = item.get("Count", 1)
             total_val += prices.get(item_type, 0) * count
     return total_val
+
+async def fetch_item_image(session, item_type, quality=1):
+    if not item_type:
+        return None
+    url = f"https://render.albiononline.com/v1/item/{item_type}.png?quality={quality}&size=80"
+    try:
+        async with session.get(url, timeout=5) as resp:
+            if resp.status == 200:
+                data = await resp.read()
+                img = Image.open(io.BytesIO(data)).convert("RGBA")
+                return img
+    except Exception:
+        pass
+    return None
+
+# ==========================================
+# LOKALNY GENERATOR GRAFIKI (PILLOW)
+# ==========================================
+async def generate_kill_image(session, killer_equip, victim_equip, victim_inventory):
+    canvas_w, canvas_h = 750, 420
+    bg_color = (24, 25, 28, 255) # Nowoczesne ciemne tło Discord/Albion
+    img = Image.new("RGBA", (canvas_w, canvas_h), bg_color)
+    draw = ImageDraw.Draw(img)
+
+    slot_size = 64
+    spacing = 8
+    
+    # Układ ekwipunku Albiona w siatce (Kolumna, Wiersz)
+    layout = {
+        "Head": (1, 0), "Armor": (1, 1), "Shoes": (1, 2),
+        "MainHand": (0, 1), "OffHand": (2, 1),
+        "Cape": (2, 0), "Mount": (1, 3),
+        "Food": (0, 2), "Potion": (0, 0)
+    }
+
+    # Rysowanie ekwipunku Zabójcy (Po lewej)
+    start_x_killer = 40
+    start_y = 30
+    for slot, pos in layout.items():
+        item = killer_equip.get(slot)
+        x = start_x_killer + pos[0] * (slot_size + spacing)
+        y = start_y + pos[1] * (slot_size + spacing)
+        
+        # Ramka slotu
+        draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=6, fill=(35, 37, 43, 255), outline=(54, 57, 65, 255), width=2)
+        if item and item.get("Type"):
+            item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
+            if item_img:
+                item_img = item_img.resize((slot_size - 6, slot_size - 6))
+                img.paste(item_img, (x + 3, y + 3), item_img)
+
+    # Rysowanie ekwipunku Ofiary (Po prawej)
+    start_x_victim = 450
+    for slot, pos in layout.items():
+        item = victim_equip.get(slot)
+        x = start_x_victim + pos[0] * (slot_size + spacing)
+        y = start_y + pos[1] * (slot_size + spacing)
+        
+        draw.rounded_rectangle([x, y, x + slot_size, y + slot_size], radius=6, fill=(35, 37, 43, 255), outline=(54, 57, 65, 255), width=2)
+        if item and item.get("Type"):
+            item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
+            if item_img:
+                item_img = item_img.resize((slot_size - 6, slot_size - 6))
+                img.paste(item_img, (x + 3, y + 3), item_img)
+
+    # Etykieta VS na środku
+    draw.text((canvas_w // 2 - 12, 130), "VS", fill=(140, 145, 155, 255))
+
+    # Plecak Ofiary na dole (Loot)
+    if victim_inventory:
+        draw.text((40, 310), "Plecak / Loot ofiary:", fill=(180, 185, 195, 255))
+        inv_slot_size = 48
+        inv_spacing = 6
+        for idx, item in enumerate(victim_inventory[:10]):
+            x = 40 + idx * (inv_slot_size + inv_spacing)
+            y = 335
+            draw.rounded_rectangle([x, y, x + inv_slot_size, y + inv_slot_size], radius=4, fill=(30, 32, 38, 255), outline=(48, 52, 60, 255))
+            if item and item.get("Type"):
+                item_img = await fetch_item_image(session, item.get("Type"), item.get("Quality", 1))
+                if item_img:
+                    item_img = item_img.resize((inv_slot_size - 4, inv_slot_size - 4))
+                    img.paste(item_img, (x + 2, y + 2), item_img)
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
 
 # ==========================================
 # PĘTLA SPRAWDZAJĄCA KILLBOARD
@@ -167,103 +255,113 @@ async def check_albion_kills():
             if not (is_killer or is_victim or is_participant):
                 continue
 
-            print(f"[KILLS] WYKRYTO KILL! Zabójca: {killer_name} | Ofiara: {victim_name}", flush=True)
-
-            # Obliczanie wartości lootu
             victim_equip = event.get("Victim", {}).get("Equipment", {})
+            killer_equip = event.get("Killer", {}).get("Equipment", {})
             victim_inventory = [item for item in event.get("Victim", {}).get("Inventory", []) if item]
+
             all_items = [item.get("Type") for item in victim_equip.values() if item]
             all_items += [item.get("Type") for item in victim_inventory if item]
-            
             prices = await get_item_prices(session, all_items, region)
+            
             equip_value = calculate_equipment_value(victim_equip, prices)
             inv_value = sum(prices.get(i.get("Type"), 0) * i.get("Count", 1) for i in victim_inventory)
             total_value = equip_value + inv_value
+            kill_fame = event.get("TotalVictimKillFame", 0)
+
+            val_str = f"{total_value / 1_000_000:.2f}M" if total_value >= 1_000_000 else f"{total_value / 1_000:.0f}k" if total_value >= 1_000 else "0"
+            fame_str = f"{kill_fame / 1_000_000:.2f}M" if kill_fame >= 1_000_000 else f"{kill_fame / 1_000:.0f}k" if kill_fame >= 1_000 else f"{kill_fame}"
 
             threshold = config.get("high_value_threshold", 15000000)
 
-            # Pobieranie profesjonalnie wyrenderowanej grafiki starcia
-            img_url = f"https://render.albionkillbot.com/event/{event_id}.png"
-            img_bytes = None
-            try:
-                async with session.get(img_url, timeout=10) as img_resp:
-                    if img_resp.status == 200:
-                        img_bytes = await img_resp.read()
-            except Exception as e:
-                print(f"[RENDER ERROR] {e}", flush=True)
+            img_buffer = await generate_kill_image(session, killer_equip, victim_equip, victim_inventory)
+            file = discord.File(fp=img_buffer, filename="killboard.png")
 
             embed_color = discord.Color.green() if is_killer else discord.Color.red() if is_victim else discord.Color.gold()
-            
             embed = discord.Embed(
                 title=f"⚔️ {killer_name}  ➔  {victim_name}",
                 url=f"https://albiononline.com/killboard/kill/{event_id}",
                 color=embed_color
             )
+            embed.set_image(url="attachment://killboard.png")
 
-            if img_bytes:
-                buffer = io.BytesIO(img_bytes)
-                file = discord.File(fp=buffer, filename="killboard.png")
-                embed.set_image(url="attachment://killboard.png")
-                
-                try:
-                    await main_channel.send(file=file, embed=embed)
-                    print(f"[SUCCESS] Wysłano profesjonalny układ graficzny!", flush=True)
-                except Exception as send_error:
-                    print(f"[DISCORD ERROR] {send_error}", flush=True)
-            else:
-                await main_channel.send(embed=embed)
-
-            if total_value >= threshold and big_channel:
-                if img_bytes:
-                    buffer.seek(0)
-                    big_file = discord.File(fp=buffer, filename="killboard.png")
-                    await big_channel.send(
-                        content=f"🚨 **BIG KILL / LEGENDARNY LOOT (> {threshold/1_000_000:.0f}M)!** 🚨",
-                        file=big_file,
-                        embed=embed
-                    )
-                else:
-                    await big_channel.send(content=f"🚨 **BIG KILL!** 🚨", embed=embed)
+            try:
+                await main_channel.send(file=file, embed=embed)
+            except Exception as e:
+                print(f"[ERROR] {e}", flush=True)
 
 # ==========================================
-# KOMENDY DISCORDA (SLASH COMMANDS)
+# KOMENDY DISCORDA (W TYM /TEST_KILL)
 # ==========================================
-@bot.tree.command(name="dodaj", description="Dodaj nowego gracza do śledzenia")
+@bot.tree.command(name="test_kill", description="Wygeneruj testowy obrazek killboardu na żywo")
+async def test_kill(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+
+    # Przykładowe przedmioty do testu graficznego
+    mock_killer_equip = {
+        "MainHand": {"Type": "T8_MAIN_SWORD", "Quality": 3},
+        "Armor": {"Type": "T8_ARMOR_LEATHER_SET", "Quality": 2},
+        "Head": {"Type": "T8_HEAD_LEATHER", "Quality": 1},
+        "Shoes": {"Type": "T8_SHOES_LEATHER", "Quality": 1},
+        "Cape": {"Type": "T8_CAPE", "Quality": 1}
+    }
+    mock_victim_equip = {
+        "MainHand": {"Type": "T7_MAIN_AXE", "Quality": 2},
+        "Armor": {"Type": "T7_ARMOR_PLATE", "Quality": 1},
+        "Head": {"Type": "T7_HEAD_PLATE", "Quality": 1},
+        "Shoes": {"Type": "T7_SHOES_PLATE", "Quality": 1},
+        "Mount": {"Type": "T5_MOUNT_HORSE", "Quality": 1}
+    }
+    mock_inventory = [
+        {"Type": "T8_ORE", "Count": 120},
+        {"Type": "T6_POTION_HEAL", "Count": 15},
+        {"Type": "T7_MEAL_STEW", "Count": 5},
+        {"Type": "T8_BAG", "Count": 1}
+    ]
+
+    async with aiohttp.ClientSession() as session:
+        img_buffer = await generate_kill_image(session, mock_killer_equip, mock_victim_equip, mock_inventory)
+        file = discord.File(fp=img_buffer, filename="killboard.png")
+        
+        embed = discord.Embed(
+            title="🧪 TESTOWY KILLBOARD (Pillow Preview)",
+            description="Tak wygląda lokalnie generowany kolaż graficzny ekwipunku i plecaka.",
+            color=discord.Color.blurple()
+        )
+        embed.set_image(url="attachment://killboard.png")
+        
+        await interaction.followup.send(file=file, embed=embed)
+
+@bot.tree.command(name="dodaj", description="Dodaj gracza do śledzenia")
 async def dodaj(interaction: discord.Interaction, nick: str):
     if nick in config["tracked_players"]:
-        await interaction.response.send_message(f"⚠️ Gracz **{nick}** jest już na liście.", ephemeral=True)
+        await interaction.response.send_message(f"⚠️ Gracz **{nick}** już jest śledzony.", ephemeral=True)
         return
     config["tracked_players"].append(nick)
     save_config(config)
-    await interaction.response.send_message(f"✅ Dodano gracza **{nick}** do monitorowania.", ephemeral=False)
+    await interaction.response.send_message(f"✅ Dodano gracza **{nick}**.", ephemeral=False)
 
 @bot.tree.command(name="usun", description="Usuń gracza ze śledzenia")
 async def usun(interaction: discord.Interaction, nick: str):
     if nick not in config["tracked_players"]:
-        await interaction.response.send_message(f"❌ Gracz **{nick}** nie znajduje się na liście.", ephemeral=True)
+        await interaction.response.send_message(f"❌ Gracz **{nick}** nie jest śledzony.", ephemeral=True)
         return
     config["tracked_players"].remove(nick)
     save_config(config)
     await interaction.response.send_message(f"🗑️ Usunięto gracza **{nick}**.", ephemeral=False)
 
-@bot.tree.command(name="lista", description="Wyświetl listę śledzonych graczy")
+@bot.tree.command(name="lista", description="Lista śledzonych graczy")
 async def lista(interaction: discord.Interaction):
     players = config["tracked_players"]
     players_str = "\n".join([f"• {p}" for p in players]) if players else "Brak"
-    main_ch = f"<#{config['main_channel_id']}>" if config['main_channel_id'] else "Nie ustawiono"
-    
-    embed = discord.Embed(title="⚙️ Konfiguracja Killbota", color=discord.Color.blurple())
-    embed.add_field(name="🌍 Region", value=config['server_region'].upper(), inline=True)
-    embed.add_field(name="📢 Kanał Główny", value=main_ch, inline=False)
-    embed.add_field(name=f"👥 Śledzeni gracze ({len(players)})", value=players_str, inline=False)
+    embed = discord.Embed(title="⚙️ Konfiguracja", color=discord.Color.blurple())
+    embed.add_field(name="Śledzeni gracze", value=players_str, inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
 @bot.tree.command(name="ustaw_kanaly", description="Ustaw kanał powiadomień")
-async def ustaw_kanaly(interaction: discord.Interaction, glowny: discord.TextChannel, duze_kille: discord.TextChannel = None):
+async def ustaw_kanaly(interaction: discord.Interaction, glowny: discord.TextChannel):
     config["main_channel_id"] = glowny.id
-    config["big_channel_id"] = duze_kille.id if duze_kille else None
     save_config(config)
-    await interaction.response.send_message(f"✅ Ustawiono główny kanał na {glowny.mention}!", ephemeral=False)
+    await interaction.response.send_message(f"✅ Ustawiono kanał główny na {glowny.mention}!", ephemeral=False)
 
 @bot.event
 async def on_ready():
@@ -285,6 +383,6 @@ if __name__ == "__main__":
 
     TOKEN = os.getenv("DISCORD_TOKEN")
     if not TOKEN:
-        print("❌ BŁĄD: Brak zmiennej DISCORD_TOKEN!", flush=True)
+        print("❌ BŁĄD: Brak DISCORD_TOKEN!", flush=True)
     else:
         bot.run(TOKEN)
